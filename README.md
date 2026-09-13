@@ -348,8 +348,3 @@ PYTHONPATH=. python -m src.evaluation.runner
 - **Why Precomputed Embeddings?** Destination descriptions are precomputed and normalized once at build time. User query vectors are projected in real time and evaluated via dot products in under 5 ms, keeping latency low.
 - **Why Multi-Feature Hybrid Scoring?** Recommending travel destinations requires balancing subjective interest with real-world constraints like budget, travel dates, and safety. A hybrid scorer guarantees practical feasibility.
 - **Why Separate the LLM from Ranking?** Allowing language models to generate recommendations directly often leads to hallucinated prices, invalid locations, and ungrounded suggestions. In Roamio, the recommendation engine handles candidate scoring, while the LLM acts purely as a conversational interface.
-
----
-
-## License
-This project is open-source and available under the [MIT License](LICENSE).
