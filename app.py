@@ -1,1071 +1,1111 @@
+"""Roamio 2.0 - Conversational Hybrid Travel Recommendation System.
+
+Modern, editorial travel discovery application with conversational AI concierge,
+two-stage hybrid retrieval, MMR diversity, and evidence-based explainability.
+"""
+
 import os
-import sys
-import traceback
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.express as px
 import folium
-from streamlit_folium import folium_static
-import matplotlib.pyplot as plt
+from streamlit_folium import st_folium
 
-# Set page configuration - must be the first Streamlit command
+from src.config import DEFAULT_WEIGHTS
+from src.data.models import UserPreferences, RecommendationResponse, Destination, RecommendationItem
+from src.data.db import get_all_destinations, get_destination_by_id, get_database_stats
+from src.data.images.local_cache import get_image_data_uri, get_image_web_url
+from src.data.images.gallery import get_destination_gallery
+from src.ranking.engine import RecommendationEngine
+from src.chat.session import ChatSession
+from src.evaluation.runner import run_ablation_study
+
+# Streamlit Page Setup
 st.set_page_config(
-    page_title="Travel Destination Recommender",
-    page_icon="✈️",
-    layout="wide"
+    page_title="Roamio — Conversational Travel Discovery",
+    page_icon=None,
+    layout="wide",
+    initial_sidebar_state="collapsed"
 )
 
-try:
-    from data_processor import load_and_process_data
-    from recommendation_engine import filter_destinations, calculate_match_score
-    from ml_recommendation import train_recommendation_model, recommend_destinations_by_country_category
-    from religion_safety_filter import train_safety_model, recommend_by_safety_and_religion
-    from cost_time_filter import train_cost_time_model, recommend_by_cost_and_time
-    from cost_tourism_filter import train_cost_tourism_model, recommend_by_cost_and_tourism
-    from geo_filter import train_geo_model, recommend_destinations_by_location
-    from religion_tourism_filter import train_religion_tourism_model, recommend_by_religion_and_tourism
-    from country_time_tourists_filter import train_country_time_tourists_model, recommend_by_country_time_tourists
-    from location_keyword_filter import train_location_keyword_model, recommend_by_location_and_keywords
-    from all_features_filter import train_all_features_model, recommend_with_all_features
-    from utils import display_destination_details, create_map
-except Exception as e:
-    st.error(f"Error importing modules: {str(e)}")
-    st.error(traceback.format_exc())
+# Custom Design System: Calm, warm, premium editorial travel aesthetic
+st.markdown("""
+<style>
+    /* Global Canvas */
+    .stApp {
+        background-color: #F7F5F0 !important;
+        color: #172B3A !important;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+    .block-container {
+        padding-top: 1.5rem !important;
+        padding-bottom: 3rem !important;
+        max-width: 1240px !important;
+    }
 
-# Application title and introduction
-st.title("✈️ Travel Destination Recommender")
-st.write("""
-Find your perfect travel destination based on your preferences. 
-Use the filters on the sidebar to narrow down destinations that match your interests.
-""")
+    /* Headings and Base Typography */
+    h1, h2, h3, h4, h5, h6 {
+        color: #172B3A !important;
+        font-weight: 600 !important;
+        letter-spacing: -0.015em !important;
+    }
+    p, span, label, div {
+        color: #172B3A;
+    }
+    hr {
+        border: none !important;
+        border-top: 1px solid #E4E0D8 !important;
+        margin: 1.5rem 0 !important;
+    }
 
-# Load data
-try:
-    df = load_and_process_data()
-    if df is None or df.empty:
-        st.error("No destination data available. Please check the data source.")
-        st.stop()
-except Exception as e:
-    st.error(f"Error loading destination data: {str(e)}")
-    st.error("Please ensure the destinations.xlsx file is available and properly formatted.")
-    st.stop()
+    /* Force Light Mode on Streamlit Inputs & Selectboxes */
+    div[data-testid="stTextInput"] input,
+    div[data-testid="stSelectbox"] div[data-baseweb="select"],
+    div[data-testid="stChatInput"] textarea {
+        background-color: #FFFFFF !important;
+        color: #172B3A !important;
+        border: 1px solid #E4E0D8 !important;
+        border-radius: 8px !important;
+    }
+    div[data-testid="stTextInput"] input:focus,
+    div[data-testid="stSelectbox"] div[data-baseweb="select"]:focus-within,
+    div[data-testid="stChatInput"] textarea:focus {
+        border-color: #C96F4A !important;
+        box-shadow: 0 0 0 1px #C96F4A !important;
+    }
+    div[data-baseweb="select"] span {
+        color: #172B3A !important;
+    }
+    
+    /* Dropdown Menus */
+    ul[data-baseweb="menu"] {
+        background-color: #FFFFFF !important;
+        border: 1px solid #E4E0D8 !important;
+        border-radius: 8px !important;
+        box-shadow: 0 4px 12px rgba(23, 43, 58, 0.08) !important;
+    }
+    li[data-baseweb="menu-item"] {
+        color: #172B3A !important;
+    }
+    li[data-baseweb="menu-item"]:hover,
+    li[data-baseweb="menu-item"][aria-selected="true"] {
+        background-color: #F7F5F0 !important;
+        color: #C96F4A !important;
+    }
 
-# Sidebar for filters
-st.sidebar.title("Your Preferences")
+    /* Chat Messages */
+    div[data-testid="stChatMessage"] {
+        background-color: #FFFFFF !important;
+        border: 1px solid #E4E0D8 !important;
+        border-radius: 12px !important;
+        padding: 1.1rem 1.3rem !important;
+        margin-bottom: 0.9rem !important;
+        box-shadow: 0 1px 3px rgba(23, 43, 58, 0.03) !important;
+    }
+    div[data-testid="stChatMessage"] p,
+    div[data-testid="stChatMessage"] li {
+        color: #172B3A !important;
+        line-height: 1.6 !important;
+    }
+    /* User Message Bubble with Soft Peach Accent */
+    div[data-testid="stChatMessage"]:has(div[data-testid="stChatMessageAvatarUser"]) {
+        background-color: #F3DED3 !important;
+        border: 1px solid #E4E0D8 !important;
+    }
+    
+    /* Expanders */
+    div[data-testid="stExpander"] {
+        background-color: #FFFFFF !important;
+        border: 1px solid #E4E0D8 !important;
+        border-radius: 10px !important;
+        box-shadow: 0 1px 3px rgba(23, 43, 58, 0.03) !important;
+        margin-top: -0.5rem !important;
+        margin-bottom: 1.25rem !important;
+    }
+    div[data-testid="stExpander"] details summary {
+        color: #172B3A !important;
+        font-weight: 600 !important;
+    }
+    div[data-testid="stExpander"] details summary:hover {
+        color: #C96F4A !important;
+    }
+    div[data-testid="stExpander"] details summary svg {
+        fill: #66737D !important;
+    }
 
-# Extract unique values for filters
-categories = sorted(df['category'].unique().tolist())
-countries = sorted(df['country'].unique().tolist())
-cost_ranges = sorted(df['cost_of_living'].unique().tolist())
+    /* Premium Elevated Navigation Header */
+    .nav-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: #FFFFFF;
+        border: 1px solid #E4E0D8;
+        border-radius: 14px;
+        padding: 0.85rem 1.4rem;
+        margin-bottom: 1.5rem;
+        box-shadow: 0 1px 4px rgba(23, 43, 58, 0.03);
+    }
+    .brand-logo-wrap {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+    .brand-badge {
+        width: 38px;
+        height: 38px;
+        background: #F3DED3;
+        border: 1px solid rgba(201, 111, 74, 0.25);
+        border-radius: 9px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+    }
+    .brand-logo {
+        font-size: 1.68rem;
+        font-weight: 700;
+        letter-spacing: -0.03em;
+        color: #172B3A;
+        margin: 0;
+        line-height: 1;
+    }
+    .brand-edition-chip {
+        background: #F7F5F0;
+        border: 1px solid #E4E0D8;
+        color: #66737D;
+        font-size: 0.72rem;
+        font-weight: 600;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        padding: 4px 9px;
+        border-radius: 6px;
+        margin-left: 4px;
+    }
+    .nav-pills-wrap {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    .nav-pill {
+        background: #F7F5F0;
+        border: 1px solid #E4E0D8;
+        color: #172B3A;
+        font-size: 0.82rem;
+        font-weight: 500;
+        padding: 5px 12px;
+        border-radius: 20px;
+        display: flex;
+        align-items: center;
+        gap: 7px;
+    }
+    .nav-pill-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background-color: #55745A;
+        display: inline-block;
+    }
+    .nav-pill-accent {
+        background: #F3DED3;
+        border: 1px solid rgba(201, 111, 74, 0.3);
+        color: #C96F4A;
+        font-weight: 600;
+    }
 
-# Standardize best time to visit options
-best_times = ["All", "Spring", "Summer", "Fall", "Winter", "Any time"]
-tourist_levels = sorted(df['approximate_annual_tourists'].unique().tolist())
+    /* Tabs Styling - Editorial & Warm */
+    div[data-baseweb="tab-list"] {
+        gap: 1.75rem !important;
+        border-bottom: 1px solid #E4E0D8 !important;
+        margin-bottom: 1.5rem !important;
+    }
+    button[data-baseweb="tab"] {
+        font-size: 1.02rem !important;
+        font-weight: 500 !important;
+        color: #66737D !important;
+        padding: 0.65rem 0.5rem !important;
+        border-bottom: 2px solid transparent !important;
+        transition: color 0.2s ease !important;
+    }
+    button[data-baseweb="tab"]:hover {
+        color: #C96F4A !important;
+    }
+    button[data-baseweb="tab"][aria-selected="true"] {
+        color: #172B3A !important;
+        font-weight: 700 !important;
+        border-bottom: 2px solid #C96F4A !important;
+    }
+
+    /* Modern Travel Destination Card */
+    .travel-card {
+        background: #FFFFFF;
+        border: 1px solid #E4E0D8;
+        border-radius: 12px 12px 0 0;
+        overflow: hidden;
+        margin-bottom: 0;
+        box-shadow: 0 1px 4px rgba(23, 43, 58, 0.04);
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .travel-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 16px rgba(23, 43, 58, 0.07);
+    }
+    /* Multi-Image Gallery Strip (3-4 photos filling the rectangle) */
+    .card-gallery-strip {
+        display: grid;
+        grid-template-columns: 2.2fr 1fr 1fr 1fr;
+        height: 180px;
+        gap: 2px;
+        background-color: #E9E6DE;
+        overflow: hidden;
+    }
+    .gallery-tile {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background-color: #E9E6DE;
+    }
+    .gallery-img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+        transition: transform 0.25s ease;
+    }
+    .gallery-img:hover {
+        transform: scale(1.04);
+    }
+    .gallery-tile-author {
+        position: absolute;
+        bottom: 4px;
+        right: 5px;
+        background: rgba(23, 43, 58, 0.75);
+        color: #F7F5F0;
+        padding: 1px 5px;
+        border-radius: 3px;
+        font-size: 0.62rem;
+        pointer-events: none;
+        white-space: nowrap;
+        max-width: 90%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .card-content {
+        padding: 1.1rem 1.25rem;
+    }
+    .card-title-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        margin-bottom: 0.4rem;
+    }
+    .card-title {
+        font-size: 1.18rem;
+        font-weight: 600;
+        color: #172B3A;
+        margin: 0;
+    }
+    .card-rank {
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: #172B3A;
+        background: #F7F5F0;
+        border: 1px solid #E4E0D8;
+        padding: 2px 8px;
+        border-radius: 4px;
+    }
+    .card-meta-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.35rem;
+        margin-bottom: 0.65rem;
+    }
+    .meta-chip {
+        background-color: #F7F5F0;
+        color: #66737D;
+        border: 1px solid #E4E0D8;
+        padding: 3px 8px;
+        border-radius: 5px;
+        font-size: 0.78rem;
+        font-weight: 500;
+    }
+    .meta-chip-cost {
+        background-color: #F3DED3;
+        color: #C96F4A;
+        border: 1px solid #E4E0D8;
+        padding: 3px 8px;
+        border-radius: 5px;
+        font-size: 0.78rem;
+        font-weight: 600;
+    }
+    .meta-chip-safety-high {
+        background-color: #EDF3EE;
+        color: #55745A;
+        border: 1px solid #D5E2D6;
+        padding: 3px 8px;
+        border-radius: 5px;
+        font-size: 0.78rem;
+        font-weight: 500;
+    }
+    .meta-chip-safety-med {
+        background-color: #F7F5F0;
+        color: #66737D;
+        border: 1px solid #E4E0D8;
+        padding: 3px 8px;
+        border-radius: 5px;
+        font-size: 0.78rem;
+        font-weight: 500;
+    }
+    .card-snippet {
+        font-size: 0.88rem;
+        color: #66737D;
+        line-height: 1.5;
+        margin: 0.5rem 0 0.65rem 0;
+    }
+    .card-rationale {
+        font-size: 0.82rem;
+        color: #172B3A;
+        background-color: #F7F5F0;
+        border-left: 3px solid #C96F4A;
+        border-top: 1px solid #E4E0D8;
+        border-right: 1px solid #E4E0D8;
+        border-bottom: 1px solid #E4E0D8;
+        padding: 6px 10px;
+        border-radius: 0 4px 4px 0;
+        margin-top: 0.5rem;
+        line-height: 1.4;
+    }
+
+    /* Detail View Styling */
+    .detail-container {
+        background: #FFFFFF;
+        border: 1px solid #E4E0D8;
+        border-radius: 12px;
+        padding: 1.5rem;
+        margin-top: 1rem;
+        margin-bottom: 2rem;
+        box-shadow: 0 2px 8px rgba(23, 43, 58, 0.04);
+    }
+    .detail-hero-box {
+        position: relative;
+        width: 100%;
+        height: 320px;
+        border-radius: 8px;
+        overflow: hidden;
+        margin-bottom: 1.25rem;
+        border: 1px solid #E4E0D8;
+    }
+    .detail-hero-img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+
+    /* Folium Map Container Integration - Seamlessly fills container rectangle */
+    div[data-testid="stCustomComponentV1"] {
+        width: 100% !important;
+        display: flex !important;
+    }
+    div[data-testid="stCustomComponentV1"] > iframe,
+    iframe[title*="folium"] {
+        width: 100% !important;
+        min-width: 100% !important;
+        border: 1px solid #E4E0D8 !important;
+        border-radius: 12px !important;
+        background-color: #E9E6DE !important;
+        box-shadow: 0 1px 4px rgba(23, 43, 58, 0.05) !important;
+        display: block !important;
+    }
+
+    /* Buttons: Primary Terracotta, Secondary White with Warm Gray border */
+    div.stButton > button[kind="primary"],
+    div.stButton > button[type="primary"] {
+        background-color: #C96F4A !important;
+        color: #FFFFFF !important;
+        border: none !important;
+        font-weight: 600 !important;
+        border-radius: 6px !important;
+        transition: background-color 0.2s ease !important;
+    }
+    div.stButton > button[kind="primary"]:hover,
+    div.stButton > button[type="primary"]:hover {
+        background-color: #B35E3B !important;
+        color: #FFFFFF !important;
+    }
+    div.stButton > button {
+        background-color: #FFFFFF !important;
+        color: #172B3A !important;
+        border: 1px solid #E4E0D8 !important;
+        font-weight: 500 !important;
+        border-radius: 6px !important;
+        transition: all 0.2s ease !important;
+    }
+    div.stButton > button:hover {
+        background-color: #F7F5F0 !important;
+        border-color: #C96F4A !important;
+        color: #C96F4A !important;
+    }
+
+    /* Metrics */
+    div[data-testid="stMetricValue"] {
+        color: #172B3A !important;
+        font-weight: 700 !important;
+    }
+    div[data-testid="stMetricLabel"] {
+        color: #66737D !important;
+    }
+
+    /* Dataframe / Table in Architecture */
+    div[data-testid="stDataFrame"] {
+        border: 1px solid #E4E0D8 !important;
+        border-radius: 8px !important;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 
-# Create filters
-with st.sidebar:
-    # Creating a dropdown for filtering options
-    filter_option = st.selectbox(
-        "Filtering Options",
-        ["Country & Category", "Religion & Safety", "Cost & Time", "Cost & Tourism", "Geo Filter", "Religion & Tourism", "Country-Time-Tourists", "Location & Keywords", "All Features"],
-        index=0,
-        key="filter_option"
+@st.cache_resource
+def get_recommendation_engine():
+    """Cache recommendation engine instance across user sessions."""
+    return RecommendationEngine()
+
+
+@st.cache_data
+def get_cached_db_stats():
+    """Cache database catalog metrics."""
+    return get_database_stats()
+
+
+@st.cache_data
+def get_cached_destinations():
+    """Cache full destinations catalog for spatial exploration."""
+    return get_all_destinations()
+
+
+# Initialize state
+engine = get_recommendation_engine()
+db_stats = get_cached_db_stats()
+all_destinations = get_cached_destinations()
+
+if "chat_session" not in st.session_state:
+    st.session_state["chat_session"] = ChatSession(engine=engine)
+if "explore_response" not in st.session_state:
+    st.session_state["explore_response"] = None
+if "selected_dest_id" not in st.session_state:
+    st.session_state["selected_dest_id"] = None
+
+chat_session: ChatSession = st.session_state["chat_session"]
+
+# Top Navigation Bar with SVG branding (Deep Navy & Terracotta accent)
+st.markdown("""
+<div class="nav-header">
+    <div class="brand-logo-wrap">
+        <div class="brand-badge">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#C96F4A" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="12 2 19 21 12 17 5 21 12 2"/>
+            </svg>
+        </div>
+        <div class="brand-logo">Roamio<span style="color:#C96F4A;">.</span></div>
+        <span class="brand-edition-chip">Curated World Guide</span>
+    </div>
+    <div class="nav-pills-wrap">
+        <div class="nav-pill">
+            <span class="nav-pill-dot"></span>
+            <span>252 Destinations</span>
+        </div>
+        <div class="nav-pill nav-pill-accent">
+            <span>AI Concierge</span>
+        </div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
+
+def render_folium_map(dest_list, active_id=None, height=480, zoom_start=2):
+    """Render muted architectural travel Folium map with markers and photo popups."""
+    if not dest_list:
+        return None
+
+    valid_dests = [d for d in dest_list if d.latitude != 0.0 and d.longitude != 0.0]
+    if not valid_dests:
+        return None
+
+    if active_id:
+        active_match = [d for d in valid_dests if d.destination_id == active_id]
+        if active_match:
+            center_lat, center_lon = active_match[0].latitude, active_match[0].longitude
+            zoom_start = 5
+        else:
+            center_lat = np.mean([d.latitude for d in valid_dests])
+            center_lon = np.mean([d.longitude for d in valid_dests])
+    else:
+        center_lat = np.mean([d.latitude for d in valid_dests])
+        center_lon = np.mean([d.longitude for d in valid_dests])
+
+    # Esri World Topo Map: Clean, high-resolution, travel-editorial cartography
+    # Warm ivory land tones, soft cyan water, relief shading, and zero watermarks/API keys
+    m = folium.Map(
+        location=[center_lat, center_lon],
+        zoom_start=zoom_start,
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
+        attr="Tiles &copy; Esri &mdash; Esri, USGS, FAO, NPS, NRCAN, GeoBase, Kadaster NL, Ordnance Survey",
+        control_scale=False,
+        width="100%",
+        height="100%"
     )
 
-    # Initialize variables
-    apply_ml_recommendation = False
-    religion_safety_button = False
-    cost_time_button = False
-    cost_tourism_button = False
-    geo_filter_button = False
-    ml_country = ""
-    ml_category = ""
-    selected_religion = ""
-    selected_safety = ""
-    selected_cost = ""
-    selected_time = ""
-    selected_cost_level = ""
-    selected_tourism_level = ""
-    location_name = ""
-    radius_km = None
-    max_results = 10
-    selected_country = ""
-    selected_tourists = ""
-    country_time_tourists_button = False
+    for d in valid_dests:
+        is_active = (d.destination_id == active_id)
+        img_web = get_image_web_url(d.thumbnail_url or d.image_url)
+        img_tag = f'<img src="{img_web}" style="width:100%; height:110px; object-fit:cover; border-radius:6px; margin-bottom:8px; border:1px solid #E4E0D8;" />' if img_web else ""
+        seasons_info = ', '.join(d.best_seasons[:2]) if d.best_seasons else 'Year-round'
 
+        desc_text = d.description or ""
+        desc_clean = desc_text.replace('"', '&quot;').replace("'", "&#39;")
+        if len(desc_clean) > 240:
+            desc_clean = desc_clean[:237] + "..."
 
-    # Train ML models in the background
-    if 'ml_model' not in st.session_state:
-        with st.spinner("Training recommendation model..."):
-            st.session_state['ml_model'] = train_recommendation_model(df)
+        activities_list = d.activities[:3] if d.activities else ["Sightseeing", "Local culture"]
+        activities_text = ", ".join(activities_list)
 
-    # Train safety model in the background
-    if 'safety_model' not in st.session_state:
-        with st.spinner("Training safety model..."):
-            safety_model, encoders, features = train_safety_model(df)
-            st.session_state['safety_model'] = safety_model
-            st.session_state['safety_encoders'] = encoders
-            st.session_state['safety_features'] = features
-
-    # Show appropriate filter options based on selection
-    if filter_option == "Country & Category":
-        st.write("Get personalized destination recommendations using machine learning.")
-
-        # Single-select dropdowns for ML recommendation
-        ml_country = st.selectbox(
-            "Select Country",
-            ["All"] + countries,
-            index=0,
-            key="ml_country"
+        popup_html = (
+            f'<div style="width:280px; font-family:-apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, sans-serif; color:#172B3A; padding:4px;">'
+            f'{img_tag}'
+            f'<div style="font-weight:700; font-size:14.5px; color:#172B3A; margin-bottom:3px;">{d.name}, {d.country}</div>'
+            f'<div style="display:flex; flex-wrap:wrap; gap:4px; margin-bottom:6px; font-size:11px;">'
+            f'<span style="background:#F3DED3; color:#C96F4A; font-weight:600; padding:1px 6px; border-radius:3px;">{d.category}</span>'
+            f'<span style="background:#F7F5F0; border:1px solid #E4E0D8; color:#172B3A; font-weight:600; padding:1px 6px; border-radius:3px;">₹{d.est_daily_cost_inr:,.0f}/day</span>'
+            f'<span style="background:#EBF2EC; color:#55745A; font-weight:600; padding:1px 6px; border-radius:3px;">{d.safety_rating} Safety</span>'
+            f'</div>'
+            f'<div style="font-size:11.5px; line-height:1.45; color:#3A4D59; margin-bottom:6px; max-height:85px; overflow-y:auto; border-left:2px solid #C96F4A; padding-left:6px;">'
+            f'{desc_clean}'
+            f'</div>'
+            f'<div style="font-size:10.5px; color:#66737D; border-top:1px solid #E4E0D8; padding-top:4px;">'
+            f'<div><strong>Top Activities</strong>: {activities_text}</div>'
+            f'<div><strong>Best Time</strong>: {seasons_info}</div>'
+            f'</div>'
+            f'</div>'
         )
 
-        ml_category = st.selectbox(
-            "Select Category",
-            ["All"] + categories,
-            index=0,
-            key="ml_category"
+        # Elegant SVG Teardrop Pin: Normal = Terracotta (#C96F4A), Selected = Deep Navy (#172B3A)
+        pin_bg = "#172B3A" if is_active else "#C96F4A"
+        dot_bg = "#FFFFFF"
+        pin_w = 26 if is_active else 20
+        pin_h = 34 if is_active else 27
+        z_index = 1000 if is_active else 100
+
+        svg_html = (
+            f'<div style="z-index:{z_index}; cursor:pointer; width:{pin_w}px; height:{pin_h}px;">'
+            f'<svg width="{pin_w}" height="{pin_h}" viewBox="0 0 24 32" fill="none" style="filter: drop-shadow(0 2px 4px rgba(23,43,58,0.32));">'
+            f'<path d="M12 0C5.37 0 0 5.37 0 12c0 9 12 20 12 20s12-11 12-20c0-6.63-5.37-12-12-12z" fill="{pin_bg}" stroke="#FFFFFF" stroke-width="2"/>'
+            f'<circle cx="12" cy="11" r="4" fill="{dot_bg}"/>'
+            f'</svg>'
+            f'</div>'
         )
 
-        # Apply ML recommendation button - made more prominent
-        apply_ml_recommendation = st.button("Get Recommendations", key="ml_button", use_container_width=True)
-
-        # Information about the ML model
-        with st.expander("About Country & Category Filter"):
-            st.write("""
-            This recommender uses machine learning to suggest destinations based on patterns in the data.
-            It analyzes the relationships between countries, categories, and destinations to provide personalized recommendations.
-            """)
-
-    elif filter_option == "Religion & Safety":
-        st.write("Find destinations by religion and safety preferences.")
-
-        # Extract unique religions from the dataset
-        religions = []
-        if 'majority_religion' in df.columns:
-            religions = sorted(df['majority_religion'].dropna().unique().tolist())
-
-        # If no religions found, provide some common options
-        if not religions:
-            religions = [
-                "Catholic", "Protestant", "Orthodox", "Christian", 
-                "Muslim", "Hindu", "Buddhist", "Jewish",
-                "Sikh", "Taoist", "Shinto"
-            ]
-
-        # Religion dropdown
-        selected_religion = st.selectbox(
-            "Select Religion",
-            ["All"] + religions,
-            index=0,
-            key="religion_dropdown"
+        custom_icon = folium.DivIcon(
+            html=svg_html,
+            icon_size=(pin_w, pin_h),
+            icon_anchor=(pin_w // 2, pin_h)
         )
 
-        # Safety level dropdown
-        selected_safety = st.selectbox(
-            "Select Safety Level",
-            ["All", "High Safety", "Low Safety"],
-            index=0,
-            key="safety_dropdown"
-        )
+        folium.Marker(
+            location=[d.latitude, d.longitude],
+            tooltip=f"{d.name}, {d.country}",
+            popup=folium.Popup(popup_html, max_width=300),
+            icon=custom_icon
+        ).add_to(m)
 
-        # Search button
-        religion_safety_button = st.button(
-            "Get Recommendations", 
-            key="religion_safety_button",
-            use_container_width=True
-        )
+    # Custom styling for Leaflet controls, canvas background, and popups
+    custom_map_css = """
+    <style>
+        .leaflet-container {
+            background-color: #E9E6DE !important;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+        }
+        .leaflet-bar a {
+            background-color: #FFFFFF !important;
+            color: #172B3A !important;
+            border-bottom: 1px solid #E4E0D8 !important;
+        }
+        .leaflet-bar a:hover {
+            background-color: #F7F5F0 !important;
+            color: #C96F4A !important;
+        }
+        .leaflet-popup-content-wrapper {
+            background: #FFFFFF !important;
+            border: 1px solid #E4E0D8 !important;
+            border-radius: 8px !important;
+            box-shadow: 0 4px 14px rgba(23, 43, 58, 0.12) !important;
+            padding: 4px !important;
+        }
+        .leaflet-popup-tip {
+            background: #FFFFFF !important;
+            border: 1px solid #E4E0D8 !important;
+        }
+        .leaflet-control-attribution {
+            background: rgba(247, 245, 240, 0.85) !important;
+            color: #66737D !important;
+            font-size: 9px !important;
+        }
+        .leaflet-control-attribution a {
+            color: #66737D !important;
+        }
+    </style>
+    <script>
+        setTimeout(function() {
+            window.dispatchEvent(new Event('resize'));
+        }, 150);
+    </script>
+    """
+    m.get_root().html.add_child(folium.Element(custom_map_css))
 
-        with st.expander("About Religion & Safety Filter"):
-            st.write("""
-            This filter helps you find destinations based on:
+    return m
 
-            1. Religious influence - locations where the selected religion has significant presence
-            2. Safety level - destinations classified as having either high or low safety
 
-            Select your preferences from the dropdowns and click 'Get Recommendations' to find matching destinations.
-            """)
-
-    elif filter_option == "Cost & Time":
-        st.write("Find destinations based on budget and timing preferences.")
-
-        # Train cost-time model in the background if not already trained
-        if 'cost_time_model' not in st.session_state:
-            with st.spinner("Training cost-time model..."):
-                st.session_state['cost_time_model'] = train_cost_time_model(df)
-
-        # Cost of Living dropdown
-        selected_cost = st.selectbox(
-            "Select Cost of Living",
-            ["All"] + cost_ranges,
-            index=0,
-            key="cost_dropdown"
-        )
-
-        # Expanded Best Time to Visit options with individual seasons
-        expanded_times = ["All"] + best_times
-
-        # Add individual seasons that map to existing categories
-        if "Spring/Fall" in best_times and "Spring" not in expanded_times:
-            expanded_times.append("Spring")
-            expanded_times.append("Fall")
-
-        if "Winter/Summer" in best_times and "Winter" not in expanded_times:
-            expanded_times.append("Winter")
-
-        if "Summer" in best_times and expanded_times.count("Summer") < 1:
-            expanded_times.append("Summer")
-
-        # Sort the times but keep "All" at the beginning
-        sorted_times = ["All"] + sorted([time for time in expanded_times if time != "All"])
-
-        # Best Time to Visit dropdown
-        selected_time = st.selectbox(
-            "Select Best Time to Visit",
-            sorted_times,
-            index=0,
-            key="time_dropdown"
-        )
-
-        # Search button
-        cost_time_button = st.button(
-            "Get Recommendations", 
-            key="cost_time_button",
-            use_container_width=True
-        )
-
-        with st.expander("About Cost & Time Filter"):
-            st.write("""
-            This filter helps you find destinations based on:
-
-            1. Cost of Living - find destinations that match your budget
-            2. Best Time to Visit - find places ideal to visit during your preferred season
-
-            Select your preferences from the dropdowns and click 'Get Recommendations' to find matching destinations.
-            """)
-
-    elif filter_option == "Cost & Tourism":
-        st.write("Find destinations based on cost of living and tourism popularity.")
-
-        # Train cost-tourism model in the background if not already trained
-        if 'cost_tourism_model' not in st.session_state:
-            with st.spinner("Training cost-tourism model..."):
-                st.session_state['cost_tourism_model'] = train_cost_tourism_model(df)
-
-        # Cost Level dropdown
-        selected_cost_level = st.selectbox(
-            "Select Cost Level",
-            ["All", "Low", "Medium", "High"],
-            index=0,
-            key="cost_level_dropdown"
-        )
-
-        # Tourism Level dropdown
-        selected_tourism_level = st.selectbox(
-            "Select Tourism Popularity",
-            ["All", "Low", "Medium", "High"],
-            index=0,
-            key="tourism_level_dropdown"
-        )
-
-        # Search button
-        cost_tourism_button = st.button(
-            "Get Recommendations", 
-            key="cost_tourism_button",
-            use_container_width=True
-        )
-
-        with st.expander("About Cost & Tourism Filter"):
-            st.write("""
-            This filter helps you find destinations based on:
-
-            1. Cost Level - find destinations that match your budget preference
-            2. Tourism Popularity - find places based on tourist volume (low, medium, or high)
-
-            The system uses machine learning clustering to group destinations by cost of living and annual tourist numbers.
-            Select your preferences from the dropdowns and click 'Get Recommendations' to find matching destinations.
-            """)
-
-    elif filter_option == "Geo Filter":
-        st.write("Find destinations near a specific location.")
-
-        # Train geo model in the background if not already trained
-        if 'geo_model' not in st.session_state:
-            with st.spinner("Preparing geographical model..."):
-                st.session_state['geo_model'] = train_geo_model(df)
-
-        # Location input
-        location_name = st.text_input(
-            "Enter your location",
-            "",
-            key="location_input",
-            help="Enter a city, region, or country name (e.g., Paris, Tokyo, New York)"
-        )
-
-        # Distance radius options
-        radius_option = st.radio(
-            "Search by:",
-            ["Nearest destinations", "Custom radius"],
-            index=0,
-            key="radius_option"
-        )
-
-        # Radius input (shown only when custom radius is selected)
-        radius_km = None
-        max_results = 10
-
-        if radius_option == "Custom radius":
-            radius_km = st.slider(
-                "Distance radius (km)",
-                min_value=50,
-                max_value=2000,
-                value=500,
-                step=50,
-                key="radius_slider"
-            )
-        else:
-            max_results = st.slider(
-                "Number of nearest destinations",
-                min_value=3,
-                max_value=30,
-                value=10,
-                step=1,
-                key="max_results_slider"
-            )
-
-        # Search button
-        geo_filter_button = st.button(
-            "Find Nearby Destinations", 
-            key="geo_filter_button",
-            use_container_width=True
-        )
-
-        with st.expander("About Geo Filter"):
-            st.write("""
-            This filter helps you find destinations based on location proximity.
-
-            How to use:
-            1. Enter your current location or a place of interest
-            2. Choose whether to find the nearest destinations or set a custom search radius
-            3. The system will find destinations that are closest to your specified location
-
-            The distance is calculated using the Haversine formula, which accounts for the Earth's curvature to provide accurate distances.
-            """)
-
-    elif filter_option == "All Features":
-        st.write("Get personalized recommendations using all features and cultural descriptions.")
+def render_destination_detail_modal(dest: Destination, explanation=None):
+    """Editorial destination detail view with photography and activity guide."""
+    with st.container():
+        st.markdown("""<div class="detail-container">""", unsafe_allow_html=True)
         
-        # Train all-features model in the background if not already trained
-        if 'all_features_model' not in st.session_state:
-            with st.spinner("Training comprehensive recommendation model..."):
-                st.session_state['all_features_model'], error = train_all_features_model(df)
-                if error:
-                    st.error(error)
+        img_web = get_image_web_url(dest.thumbnail_url or dest.image_url)
+        img_fallback = get_image_data_uri(dest.thumbnail_url or dest.image_url)
+        author_text = dest.photo_author or "Unsplash Contributor"
+        author_link = dest.photo_author_url or "https://unsplash.com"
         
-        # Create dropdowns for all features
+        modal_html = (
+            f'<div class="detail-hero-box">'
+            f'<img class="detail-hero-img" src="{img_web}" onerror="this.onerror=null; this.src=\'{img_fallback}\';" alt="{dest.name}" />'
+            f'<div class="photo-credit">Photo by <a href="{author_link}" target="_blank">{author_text}</a> on {dest.image_provider or "Unsplash"}</div>'
+            f'</div>'
+            f'<h2 style="margin:0 0 0.5rem 0; color:#172B3A;">{dest.name}, {dest.country}</h2>'
+            f'<div style="color:#66737D; font-size:0.95rem; margin-bottom:1rem;">'
+            f'<b>Region:</b> {dest.region or "Scenic"} ({dest.continent}) &nbsp;|&nbsp; '
+            f'<b>Category:</b> {dest.category} &nbsp;|&nbsp; '
+            f'<b>Daily Cost:</b> ₹{dest.est_daily_cost_inr:,.0f} ({dest.cost_level}) &nbsp;|&nbsp; '
+            f'<b>Safety:</b> {dest.safety_rating} Safety'
+            f'</div>'
+            f'<p style="color:#172B3A; font-size:1.02rem; line-height:1.6;">{dest.description}</p>'
+        )
+        st.markdown(modal_html, unsafe_allow_html=True)
+
+        col_a, col_b = st.columns(2)
+        with col_a:
+            if dest.cultural_significance:
+                st.markdown(f"**Heritage & Culture**: {dest.cultural_significance}")
+            if dest.activities:
+                st.markdown(f"**Recommended Activities**: {', '.join(dest.activities)}")
+        with col_b:
+            if dest.famous_foods:
+                st.markdown(f"**Signature Local Cuisine**: {', '.join(dest.famous_foods)}")
+            if dest.best_seasons:
+                st.markdown(f"**Optimal Travel Seasons**: {', '.join(dest.best_seasons)}")
+
+        if explanation:
+            with st.expander("Ranking Evidence & Feature Breakdown"):
+                st.markdown("**Deterministic Feature Signals**:")
+                for r in explanation.reasons:
+                    st.markdown(f"- {r}")
+                
+                st.markdown("**Relative Signal Contributions**:")
+                f_cols = st.columns(len(explanation.feature_contributions))
+                for idx, (k, v) in enumerate(explanation.feature_contributions.items()):
+                    with f_cols[idx]:
+                        st.metric(label=k, value=f"{v * 100:.0f}%")
+        
+        st.markdown("</div>", unsafe_allow_html=True)
+
+
+def render_destination_card(
+    item: RecommendationItem,
+    key_prefix: str = "chat",
+    duration_days: int = 7,
+    show_map_button: bool = False
+):
+    """Render modern editorial destination card with 4-photo gallery strip and expandable overview & reasoning."""
+    d = item.destination
+    gallery = get_destination_gallery(d)
+
+    tiles = []
+    for g in gallery[:4]:
+        author = g.get("author", "Unsplash")
+        alt = g.get("alt", f"{d.name}, {d.country}")
+        web_uri = g.get("web_url") or g.get("data_uri", "")
+        fallback_uri = g.get("data_uri", "")
+        tile_html = (
+            f'<div class="gallery-tile">'
+            f'<img class="gallery-img" src="{web_uri}" onerror="this.onerror=null; this.src=\'{fallback_uri}\';" alt="{alt}" title="{alt}" />'
+            f'<div class="gallery-tile-author">{author}</div>'
+            f'</div>'
+        )
+        tiles.append(tile_html)
+    gallery_tiles_html = "".join(tiles)
+
+    badge_budget = f"₹{d.est_daily_cost_inr:,.0f} / day"
+    est_trip_cost = d.est_daily_cost_inr * (duration_days or 7)
+    reasons_list = item.explanation.reasons or ["Strong semantic and contextual match."]
+    top_reason = reasons_list[0]
+    safety_chip_class = "meta-chip-safety-high" if (d.safety_rating and d.safety_rating.lower() == "high") else "meta-chip"
+    seasons_text = f"Best: {', '.join(d.best_seasons[:2])}" if d.best_seasons else "Best: Year-round"
+
+    card_html = (
+        f'<div class="travel-card">'
+        f'<div class="card-gallery-strip">{gallery_tiles_html}</div>'
+        f'<div class="card-content">'
+        f'<div class="card-title-row">'
+        f'<h3 class="card-title">{d.name}, {d.country}</h3>'
+        f'<span class="card-rank">Pick #{item.rank} · {int(item.final_score * 100)}% Match</span>'
+        f'</div>'
+        f'<div class="card-meta-chips">'
+        f'<span class="meta-chip">{d.category}</span>'
+        f'<span class="meta-chip-cost">{badge_budget}</span>'
+        f'<span class="{safety_chip_class}">{d.safety_rating} Safety</span>'
+        f'<span class="meta-chip">{seasons_text}</span>'
+        f'</div>'
+        f'<div class="card-snippet">{d.description[:185]}...</div>'
+        f'<div class="card-rationale"><b>Why Roamio Chose This:</b> {top_reason}</div>'
+        f'</div>'
+        f'</div>'
+    )
+    st.markdown(card_html, unsafe_allow_html=True)
+
+    with st.expander(f"Explore {d.name} — Full Overview & Ranking Evidence", expanded=False):
+        st.markdown(f"#### {d.name}, {d.country}")
+        st.markdown(f"{d.description}")
+
+        if d.cultural_significance:
+            st.markdown(f"**Heritage & Cultural Significance**:\n{d.cultural_significance}")
+
         col1, col2 = st.columns(2)
-        
         with col1:
-            # Use preprocessed labels from the model
-            model_labels = st.session_state['all_features_model']['unique_values']
-            
-            selected_country = st.selectbox(
-                "Select Country",
-                ["All"] + model_labels['countries'],
-                key="all_features_country"
-            )
-            selected_category = st.selectbox(
-                "Select Category",
-                ["All"] + model_labels['categories'],
-                key="all_features_category"
-            )
-            selected_religion = st.selectbox(
-                "Select Religion",
-                ["All"] + model_labels['religions'],
-                key="all_features_religion"
-            )
-        
+            if d.activities:
+                st.markdown("**Top Activities & Things to Do**:")
+                for act in d.activities:
+                    st.markdown(f"- {act}")
         with col2:
-            selected_cost = st.selectbox(
-                "Cost of Living",
-                ["All"] + model_labels['costs'],
-                key="all_features_cost"
-            )
-            selected_time = st.selectbox(
-                "Best Time to Visit",
-                ["All"] + model_labels['times'],
-                key="all_features_time"
-            )
-            selected_safety = st.selectbox(
-                "Safety Level",
-                ["All"] + model_labels['safety'],
-                key="all_features_safety"
-            )
-            
-            keywords = st.text_input(
-                "Enter Keywords of Interest",
-                help="Enter keywords related to your interests (e.g., beaches, mountains, history)",
-                key="all_features_keywords"
-            )
+            if d.famous_foods:
+                st.markdown("**Signature Culinary Highlights**:")
+                for food in d.famous_foods:
+                    st.markdown(f"- {food}")
 
-        # Search button
-        all_features_button = st.button(
-            "Get Personalized Recommendations", 
-            key="all_features_button",
-            use_container_width=True
-        )
+        st.markdown("---")
+        st.markdown("#### Model Decision Reasoning & Grounded Evidence")
+        st.markdown(f"- **Trip Cost Estimate**: Approx. ₹{est_trip_cost:,.0f} for {duration_days or 7} days (₹{d.est_daily_cost_inr:,.0f}/day) — *{item.explanation.budget_fit}*")
+        st.markdown(f"- **Seasonal Timing**: {', '.join(d.best_seasons)} — *{item.explanation.seasonal_fit}*")
+        st.markdown(f"- **Safety Classification**: {d.safety_rating} rating.")
+
+        st.markdown("**Deterministic Feature Signals Considered**:")
+        for r in reasons_list:
+            st.markdown(f"- {r}")
+
+        if item.explanation.feature_contributions:
+            st.markdown("**Relative Signal Contributions**:")
+            cols = st.columns(len(item.explanation.feature_contributions))
+            for idx, (sig_name, sig_val) in enumerate(item.explanation.feature_contributions.items()):
+                with cols[idx]:
+                    st.metric(label=sig_name, value=f"{sig_val * 100:.0f}%")
+
+        if show_map_button:
+            if st.button(f"Focus {d.name} on Map", key=f"{key_prefix}_focus_{d.destination_id}", use_container_width=True):
+                st.session_state["selected_dest_id"] = d.destination_id
+                st.rerun()
+
+
+# Main Tabs: Put Conversational Concierge FRONT AND CENTER (Tab 1)
+tab_chat, tab_explore, tab_map, tab_about = st.tabs([
+    "Chat Concierge",
+    "Explore & Filter",
+    "Spatial Map",
+    "System Architecture"
+])
+
+# ==========================================
+# TAB 1: CHAT CONCIERGE (DEFAULT HERO VIEW)
+# ==========================================
+with tab_chat:
+    st.markdown("### Conversational Concierge")
+    st.write("Tell Roamio what kind of journey you envision. State your budget, duration, preferred travel month, or activities in everyday language.")
+
+    # Sample Prompts
+    st.markdown("**Sample queries to get started:**")
+    q_col1, q_col2, q_col3 = st.columns(3)
+    with q_col1:
+        if st.button("Budget beach trip in Asia for 8 days", use_container_width=True):
+            st.session_state["chat_pending"] = "I have a budget of ₹70,000 for 8 days. I want a warm beach destination in Asia with great food and relaxed vibes."
+    with q_col2:
+        if st.button("Peaceful mountain retreat with temples", use_container_width=True):
+            st.session_state["chat_pending"] = "I am looking for a peaceful mountain getaway with scenic hiking trails, ancient temples, and rich heritage."
+    with q_col3:
+        if st.button("Historic European cultural city tour", use_container_width=True):
+            st.session_state["chat_pending"] = "Recommend historic European cities known for world-class museums, art, architecture, and walkable centers."
+
+    # Chat History
+    for msg in chat_session.history:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    # User Input
+    user_input = st.chat_input("Where would you like to travel? (e.g. '₹60,000 budget for 7 days in Europe')")
+    if "chat_pending" in st.session_state and st.session_state["chat_pending"]:
+        user_input = st.session_state.pop("chat_pending")
+
+    if user_input:
+        with st.chat_message("user"):
+            st.markdown(user_input)
+
+        with st.chat_message("assistant"):
+            with st.spinner("Analyzing preferences & computing hybrid recommendations..."):
+                reply, rec_resp = chat_session.process_turn(user_input)
+                st.markdown(reply)
+                st.session_state["chat_rec_response"] = rec_resp
+
+    # Render Visual Recommendations for Latest Assistant Turn
+    chat_rec = st.session_state.get("chat_rec_response")
+    if chat_rec and chat_rec.items:
+        st.markdown("---")
+        st.markdown("#### Curated Recommendations")
         
-        if all_features_button:
-            if 'all_features_model' not in st.session_state:
-                st.error("Recommendation model is not available. Please try again.")
-            else:
-                with st.spinner("Finding personalized recommendations..."):
-                    # Prepare preferences
-                    preferences = {
-                        'country': selected_country if selected_country != "All" else None,
-                        'category': selected_category if selected_category != "All" else None,
-                        'majority_religion': selected_religion if selected_religion != "All" else None,
-                        'cost_of_living': selected_cost if selected_cost != "All" else None,
-                        'best_time_to_visit': selected_time if selected_time != "All" else None,
-                        'safety': selected_safety if selected_safety != "All" else None,
-                        'latitude': df['latitude'].mean(),
-                        'longitude': df['longitude'].mean(),
-                        'approximate_annual_tourists': df['approximate_annual_tourists'].mean()
-                    }
-                    
-                    # Get recommendations
-                    all_features_df, error = recommend_with_all_features(
-                        st.session_state['all_features_model'],
-                        df,
-                        preferences,
-                        keywords
-                    )
-                    
-                    if error:
-                        st.error(error)
-                    elif all_features_df.empty:
-                        st.warning("No destinations match your criteria. Try different selections.")
-                    else:
-                        # Store recommendations in session state
-                        st.session_state['filtered_df'] = all_features_df
-                        st.session_state['filter_mode'] = 'standard'
-                        
-                        st.subheader("Recommended Destinations")
-                            
-    elif filter_option == "Religion & Tourism":
-        st.write("Find destinations based on religion and tourism popularity.")
+        c_cards, c_map = st.columns([1.15, 1.0], gap="large")
+        with c_cards:
+            dur = chat_rec.applied_preferences.duration_days or 7
+            for item in chat_rec.items[:4]:
+                render_destination_card(item, key_prefix="chat", duration_days=dur, show_map_button=False)
 
-        # Train religion-tourism model in the background if not already trained
-        if 'religion_tourism_model' not in st.session_state:
-            with st.spinner("Training religion-tourism model..."):
-                st.session_state['religion_tourism_model'] = train_religion_tourism_model(df)
+        with c_map:
+            st.markdown("<div style='font-size:0.95rem; font-weight:600; color:#172B3A; margin-bottom:0.4rem;'>Geographic Locations</div>", unsafe_allow_html=True)
+            chat_map = render_folium_map([it.destination for it in chat_rec.items[:4]], height=440)
+            if chat_map:
+                st_folium(chat_map, returned_objects=[], use_container_width=True, height=440)
 
-        # Get unique religions from the dataset
-        religions = sorted(df['majority_religion'].unique().tolist())
+            # Refinement actions
+            st.markdown("#### Conversational Refinements")
+            ref_col1, ref_col2 = st.columns(2)
+            with ref_col1:
+                if st.button("Find budget alternatives", use_container_width=True):
+                    st.session_state["chat_pending"] = "Actually, show me cheaper budget-friendly options."
+                    st.rerun()
+                if st.button("Explore other regions", use_container_width=True):
+                    st.session_state["chat_pending"] = "Show me alternative destinations in other regions."
+                    st.rerun()
+            with ref_col2:
+                if st.button("Why this top match?", use_container_width=True):
+                    st.session_state["chat_pending"] = "Why did you rank the first destination highest?"
+                    st.rerun()
+                if st.button("Compare top choices", use_container_width=True):
+                    st.session_state["chat_pending"] = "Compare the first and second recommendations."
+                    st.rerun()
 
-        # Religion dropdown
-        selected_religion = st.selectbox(
-            "Select Religion",
-            ["All"] + religions,
-            index=0,
-            key="religion_tourism_dropdown"
+
+# ==========================================
+# TAB 2: EXPLORE & FILTER (SPLIT VIEW)
+# ==========================================
+with tab_explore:
+    with st.expander("Search Filters & Travel Criteria", expanded=True):
+        f1, f2, f3, f4 = st.columns(4)
+        with f1:
+            continents_opts = ["All", "Asia", "Europe", "Americas", "Africa", "Middle East", "Oceania"]
+            sel_continent = st.selectbox("Continent", continents_opts, key="exp_continent")
+        with f2:
+            cat_opts = ["All", "City", "Beach", "Mountain", "Cultural", "Archaeological Site", "National Park", "Island", "Lake", "Fjord"]
+            sel_category = st.selectbox("Category", cat_opts, key="exp_category")
+        with f3:
+            budget_val = st.slider("Total Budget (INR)", min_value=15000, max_value=300000, value=80000, step=5000, key="exp_budget")
+        with f4:
+            duration_val = st.slider("Duration (Days)", min_value=3, max_value=30, value=7, key="exp_duration")
+
+        search_query = st.text_input(
+            "Keyword Desires (Optional)",
+            placeholder="e.g. serene mountain trails, historic temples, authentic food, coastal relaxation",
+            key="exp_query"
         )
 
-        # Tourism Level dropdown
-        selected_tourism_level = st.selectbox(
-            "Select Tourism Level",
-            ["All", "Low", "Medium", "High"],
-            index=0,
-            key="tourism_level_dropdown"
+        b_col1, b_col2 = st.columns([1, 4])
+        with b_col1:
+            search_clicked = st.button("Search Destinations", type="primary", use_container_width=True)
+        with b_col2:
+            if st.button("Reset Criteria", use_container_width=False):
+                st.session_state["explore_response"] = None
+                st.session_state["selected_dest_id"] = None
+                st.rerun()
+
+    if search_clicked or st.session_state["explore_response"] is None:
+        user_prefs = UserPreferences(
+            query_text=search_query,
+            budget_max_inr=float(budget_val),
+            duration_days=duration_val,
+            continents=[sel_continent] if sel_continent != "All" else [],
+            categories=[sel_category] if sel_category != "All" else []
         )
+        st.session_state["explore_response"] = engine.recommend(user_prefs, top_k=6, apply_diversity=True)
 
-        # Search button
-        religion_tourism_button = st.button(
-            "Get Recommendations",
-            key="religion_tourism_button",
-            use_container_width=True
+    rec_res: RecommendationResponse = st.session_state["explore_response"]
+
+    if rec_res and rec_res.items:
+        items = rec_res.items
+        dest_objs = [it.destination for it in items]
+
+        st.markdown(f"<div style='color:#66737D; font-size:0.9rem; margin-bottom:1rem;'>Showing {len(items)} curated destinations matching your criteria</div>", unsafe_allow_html=True)
+
+        col_cards, col_map = st.columns([1.15, 1.0], gap="large")
+
+        with col_cards:
+            dur = duration_val or 7
+            for item in items:
+                render_destination_card(item, key_prefix="explore", duration_days=dur, show_map_button=True)
+
+        with col_map:
+            st.markdown("<div style='font-size:0.95rem; font-weight:600; color:#172B3A; margin-bottom:0.4rem;'>Interactive Destination Map</div>", unsafe_allow_html=True)
+            active_id = st.session_state.get("selected_dest_id")
+            m = render_folium_map(dest_objs, active_id=active_id, height=560)
+            if m:
+                st_folium(m, returned_objects=[], use_container_width=True, height=560)
+
+        if st.session_state.get("selected_dest_id"):
+            selected_dest = get_destination_by_id(st.session_state["selected_dest_id"])
+            if selected_dest:
+                st.markdown("---")
+                matching_exp = next((it.explanation for it in items if it.destination.destination_id == selected_dest.destination_id), None)
+                render_destination_detail_modal(selected_dest, explanation=matching_exp)
+
+
+# ==========================================
+# TAB 3: SPATIAL MAP EXPLORER
+# ==========================================
+with tab_map:
+    st.markdown("### Spatial Map Explorer")
+    st.write("Browse destinations across the globe. Click any pin on the map to inspect location descriptions, or filter by continent, category, and budget tier.")
+
+    m_col1, m_col2, m_col3 = st.columns(3)
+    with m_col1:
+        map_cont = st.selectbox("Filter Continent", ["All", "Europe", "Asia", "Americas", "Africa", "Middle East", "Oceania"], key="map_filter_cont")
+    with m_col2:
+        map_cat = st.selectbox("Filter Category", ["All", "City", "Beach", "Mountain", "Cultural", "Archaeological Site", "National Park", "Island"], key="map_filter_cat")
+    with m_col3:
+        map_cost = st.selectbox("Budget Tier", ["All", "Low", "Medium", "Luxury"], key="map_filter_cost")
+
+    filtered_dests = all_destinations
+    if map_cont != "All":
+        filtered_dests = [d for d in filtered_dests if d.continent == map_cont]
+    if map_cat != "All":
+        filtered_dests = [d for d in filtered_dests if map_cat.lower() in d.category.lower()]
+    if map_cost != "All":
+        filtered_dests = [d for d in filtered_dests if d.cost_level.lower() == map_cost.lower()]
+
+    st.markdown(f"<div style='color:#66737D; font-size:0.88rem; margin-bottom:0.6rem;'>Displaying {len(filtered_dests)} destinations on the map &middot; Click any pin to inspect complete description and photos</div>", unsafe_allow_html=True)
+
+    active_spatial_id = st.session_state.get("spatial_selected_id")
+    full_map = render_folium_map(filtered_dests, active_id=active_spatial_id, height=540, zoom_start=2)
+
+    clicked_dest = None
+    if full_map:
+        map_data = st_folium(
+            full_map,
+            returned_objects=["last_object_clicked_tooltip", "last_object_clicked"],
+            use_container_width=True,
+            height=540,
+            key="spatial_explorer_map"
         )
+        if map_data and map_data.get("last_object_clicked_tooltip"):
+            clicked_tooltip = map_data["last_object_clicked_tooltip"]
+            for d in all_destinations:
+                if f"{d.name}, {d.country}" == clicked_tooltip or d.name == clicked_tooltip or d.name in clicked_tooltip:
+                    clicked_dest = d
+                    st.session_state["spatial_selected_id"] = d.destination_id
+                    break
 
-        with st.expander("About Religion & Tourism Filter"):
-            st.write("""
-            This filter helps you find destinations based on:
+    # Determine destination to inspect
+    active_inspect_dest = clicked_dest
+    if not active_inspect_dest and active_spatial_id:
+        for d in all_destinations:
+            if d.destination_id == active_spatial_id:
+                active_inspect_dest = d
+                break
 
-            1. Religion - find destinations with specific religious influences
-            2. Tourism Level - find places based on tourist volume (low, medium, or high)
+    st.markdown("---")
+    st.markdown("#### Destination Inspector")
 
-            The system uses machine learning clustering to group destinations by their religious significance and annual tourist numbers.
-            Select your preferences from the dropdowns and click 'Get Recommendations' to find matching destinations.
-            """)
-    elif filter_option == "Location & Keywords":
-        st.write("Find destinations based on location proximity and cultural keywords.")
+    col_sel, col_stats = st.columns([2.5, 1.5])
+    with col_sel:
+        dest_picker_options = ["Click a pin above or choose destination..."] + [f"{d.name}, {d.country} ({d.category})" for d in filtered_dests]
+        current_picker_idx = 0
+        if active_inspect_dest:
+            opt_match = f"{active_inspect_dest.name}, {active_inspect_dest.country} ({active_inspect_dest.category})"
+            if opt_match in dest_picker_options:
+                current_picker_idx = dest_picker_options.index(opt_match)
+        
+        chosen_opt = st.selectbox("Inspect Destination Details:", dest_picker_options, index=current_picker_idx, key="spatial_dest_picker")
+        if chosen_opt != "Click a pin above or choose destination...":
+            chosen_dest_name = chosen_opt.split(", ")[0].strip()
+            for d in filtered_dests:
+                if d.name == chosen_dest_name:
+                    active_inspect_dest = d
+                    st.session_state["spatial_selected_id"] = d.destination_id
+                    break
 
-        # Train location-keyword model in the background if not already trained
-        if 'location_keyword_model' not in st.session_state:
-            with st.spinner("Training location-keyword model..."):
-                st.session_state['location_keyword_model'], error = train_location_keyword_model(df)
-                if error:
-                    st.error(error)
+    with col_stats:
+        if active_inspect_dest:
+            st.markdown(f"""
+            <div style="background:#FFFFFF; border:1px solid #E4E0D8; border-radius:8px; padding:10px 14px; margin-top:24px;">
+                <div style="font-size:12px; color:#66737D;">Daily Budget Profile</div>
+                <div style="font-size:16px; font-weight:700; color:#C96F4A;">₹{active_inspect_dest.est_daily_cost_inr:,.0f} <span style="font-size:12px; color:#172B3A; font-weight:400;">/ day</span></div>
+                <div style="font-size:11px; color:#55745A; margin-top:2px;">{active_inspect_dest.safety_rating} Safety Prior &middot; {active_inspect_dest.cost_level} Budget</div>
+            </div>
+            """, unsafe_allow_html=True)
 
-        # Location input
-        location_name = st.text_input(
-            "Enter your location",
-            key="location_keyword_input",
-            help="Enter a city, region, or country name (e.g., Paris, Tokyo, New York)"
-        )
-
-        # Keywords input
-        keywords = st.text_input(
-            "Enter keywords of interest",
-            key="cultural_keywords_input",
-            help="Enter keywords related to your interests (e.g., ancient temples, art museums, beaches)"
-        )
-
-        # Number of recommendations
-        num_recommendations = st.slider(
-            "Number of recommendations",
-            min_value=3,
-            max_value=10,
-            value=5,
-            key="num_recommendations_slider"
-        )
-
-        # Search button
-        location_keyword_button = st.button(
-            "Get Recommendations",
-            key="location_keyword_button",
-            use_container_width=True
-        )
-
-        with st.expander("About Location & Keywords Filter"):
-            st.write("""
-            This filter helps you find destinations based on:
-
-            1. Proximity to your location
-            2. Cultural and descriptive keywords matching your interests
-
-            The system uses natural language processing to match your keywords with destination descriptions
-            and calculates geographical distances to provide relevant recommendations near you.
-            """)
-
-    elif filter_option == "Country-Time-Tourists":
-        st.write("Find destinations based on country, best time to visit, and tourist numbers.")
-
-        # Country dropdown
-        selected_country = st.selectbox(
-            "Select Country",
-            ["All"] + countries,
-            index=0,
-            key="country_dropdown"
-        )
-
-        # Best Time to Visit dropdown
-        selected_time = st.selectbox(
-            "Select Best Time to Visit",
-            best_times,
-            index=0,
-            key="time_dropdown_country"
-        )
-
-        # Tourist Level dropdown
-        selected_tourists = st.selectbox(
-            "Select Tourist Level",
-            ["All", "Low", "Medium", "High"],
-            index=0,
-            key="tourists_dropdown"
-        )
-
-        # Train model in the background if not already trained
-        if 'country_time_tourists_model' not in st.session_state:
-            with st.spinner("Training Country-Time-Tourists model..."):
-                st.session_state['country_time_tourists_model'] = train_country_time_tourists_model(df)
-
-        # Search button
-        country_time_tourists_button = st.button(
-            "Get Recommendations",
-            key="country_time_tourists_button",
-            use_container_width=True
-        )
-
-        with st.expander("About Country-Time-Tourists Filter"):
-            st.write("""
-            This filter helps you find destinations based on:
-
-            1. Country - select a specific country or leave as "All"
-            2. Best Time to Visit - choose a preferred season
-            3. Tourist Level - specify your preference (low, medium, or high) tourist volume
-
-            Select your preferences and click "Get Recommendations" for results.
-            """)
+    if active_inspect_dest:
+        render_destination_detail_modal(active_inspect_dest, explanation=None)
+        
+        c_act1, _ = st.columns([1.5, 2])
+        with c_act1:
+            if st.button(f"Plan a trip to {active_inspect_dest.name} in Concierge Chat", use_container_width=True):
+                st.session_state["chat_pending"] = f"I am interested in traveling to {active_inspect_dest.name}, {active_inspect_dest.country}. Can you give me a personalized itinerary, top attractions, and budget breakdown?"
+                st.rerun()
 
 
-    # Remove standard filters completely
-    apply_filters = False
-    min_rating = 0
+# ==========================================
+# TAB 4: SYSTEM ARCHITECTURE & EVALUATION
+# ==========================================
+with tab_about:
+    st.markdown("### System Architecture & Empirical Evaluation")
+    st.write("Roamio combines conversational intent understanding with two-stage retrieval, semantic embeddings, and multi-signal ranking.")
 
-# Main content area
-# Initialize session state with ML filtered data if not present
-if ('filtered_df' not in st.session_state and 'ml_filtered_df' not in st.session_state):
-    # Set initial state to ML mode, but with no data yet
-    st.session_state['filter_mode'] = 'ml'
+    st.markdown("""
+    #### Architecture Overview:
+    1. **Two-Stage Candidate Pipeline**: SQL-based pre-filtering rapidly subsets candidate space, allowing dense semantic scoring and MMR diversity re-ranking to run in sub-15ms latency.
+    2. **Dual Representation**: Combines lexical precision (**TF-IDF**) with deep semantic similarity (**BGE / MiniLM Dense Sentence Embeddings**).
+    3. **Multi-Signal Hybrid Scorer**: Computes a principled weighted combination of semantic similarity, lexical overlap, budget compatibility decay curves, seasonal alignment, and safety priors.
+    4. **Maximal Marginal Relevance (MMR)**: Balances relevance with geographic and categorical diversity to avoid localized recommendation clustering.
+    5. **Anti-Hallucination Guardrails**: The LLM never decides destination rankings directly; it translates user intent and renders grounded explanations based on verified catalog features.
+    """)
 
-# Handle ML-based recommendations
-if apply_ml_recommendation:
-    if ml_country == "All" and ml_category == "All":
-        # If both are "All", just show all destinations
-        ml_filtered_df = df.copy()
+    st.markdown("#### Empirical Benchmark & Ablation Study")
+    st.write("Evaluated across curated ground-truth travel benchmarks (Precision@5, Recall@10, NDCG@10, MRR, Intra-List Diversity):")
 
-        # Store ML recommendations in session state
-        st.session_state['ml_filtered_df'] = ml_filtered_df
-        st.session_state['filter_mode'] = 'ml'
+    if st.button("Run Live Benchmark", use_container_width=False):
+        with st.spinner("Executing live ablation benchmark across baseline models..."):
+            results = run_ablation_study()
+            st.session_state["ablation_results"] = results
 
-        # Show filter details as title
-        st.subheader(f"All Destinations")
-
-        # Clear standard filtered data if it exists
-        if 'filtered_df' in st.session_state:
-            del st.session_state['filtered_df']
-    elif ml_country == "All" or ml_category == "All":
-        st.warning("Please select a specific value for both Country and Category, or 'All' for both.")
-    elif 'ml_model' in st.session_state and st.session_state['ml_model'] is not None:
-        # Show loading indicator
-        with st.spinner("Getting recommendations..."):
-            # Use ML model to get recommendations
-            ml_filtered_df = recommend_destinations_by_country_category(
-                st.session_state['ml_model'],
-                df,
-                ml_country,
-                ml_category
-            )
-
-            # Check if we got results
-            if ml_filtered_df.empty:
-                st.warning(f"No destinations found for {ml_category} in {ml_country}. Try a different combination.")
-            else:
-                # Store ML recommendations in session state
-                st.session_state['ml_filtered_df'] = ml_filtered_df
-                st.session_state['filter_mode'] = 'ml'
-
-                # Show filter details as title
-                st.subheader(f"ML Recommendations for {ml_category} in {ml_country}")
-
-                # Clear standard filtered data if it exists
-                if 'filtered_df' in st.session_state:
-                    del st.session_state['filtered_df']
+    if "ablation_results" in st.session_state:
+        df_res = pd.DataFrame(st.session_state["ablation_results"])
+        st.dataframe(df_res, use_container_width=True)
     else:
-        st.error("ML recommendation model is not available. Please try again.")
+        default_benchmark_data = [
+            {"Model": "TF-IDF Baseline", "P@5": 0.2500, "R@10": 0.3438, "NDCG@10": 0.3024, "MRR": 0.4458, "Diversity (ILD)": 0.8562, "Latency (ms)": 1.07},
+            {"Model": "Dense Embeddings", "P@5": 0.4750, "R@10": 0.6125, "NDCG@10": 0.6149, "MRR": 0.7333, "Diversity (ILD)": 0.8321, "Latency (ms)": 4.42},
+            {"Model": "Two-Stage Retrieval", "P@5": 0.4250, "R@10": 0.6000, "NDCG@10": 0.6169, "MRR": 0.8333, "Diversity (ILD)": 0.7803, "Latency (ms)": 8.72},
+            {"Model": "Hybrid (No Diversity)", "P@5": 0.5500, "R@10": 0.7312, "NDCG@10": 0.7585, "MRR": 1.0000, "Diversity (ILD)": 0.8614, "Latency (ms)": 9.86},
+            {"Model": "Roamio Hybrid + MMR", "P@5": 0.5000, "R@10": 0.5750, "NDCG@10": 0.6694, "MRR": 1.0000, "Diversity (ILD)": 0.8858, "Latency (ms)": 13.37},
+        ]
+        st.dataframe(pd.DataFrame(default_benchmark_data), use_container_width=True)
 
-# Handle Religion and Safety filter
-if religion_safety_button:
-    if selected_religion == "All" and selected_safety == "All":
-        # If both are "All", show all destinations
-        religion_safety_df = df.copy()
-        error_message = None
+    st.markdown("""
+    #### Key Empirical Findings:
+    - **Dense Semantic Gain**: Dense embeddings deliver **+103% NDCG@10 improvement** over lexical TF-IDF by recognizing conceptual synonyms (*"serene alpine retreat"* matches *"peaceful mountain"*).
+    - **Budget & Seasonal Soft Constraints**: Unconstrained semantic search frequently suggests high-cost luxury getaways to budget backpackers. Roamio's hybrid scorer enforces continuous budget decay curves and seasonal compatibility.
+    - **MMR Intra-List Diversity**: Pure similarity tends to cluster all top recommendations within a single region. MMR guarantees regional and categorical variety without sacrificing top match relevance.
+    """)
 
-        # Store recommendations in session state
-        st.session_state['filtered_df'] = religion_safety_df
-        st.session_state['filter_mode'] = 'standard'
-
-        # Show filter details as title
-        st.subheader(f"All Destinations")
-    elif selected_religion == "All" or selected_safety == "All":
-        # If only one is "All", prompt for both specific or both "All"
-        st.warning("Please select a specific value for both Religion and Safety, or 'All' for both.")
-        religion_safety_df = pd.DataFrame()
-        error_message = "Incomplete filter selection"
-    elif ('safety_model' in st.session_state and 
-          'safety_encoders' in st.session_state and 
-          'safety_features' in st.session_state):
-        # Format the input for the filter function
-        safety_level = "Low" if "Low" in selected_safety else "High"
-        formatted_input = f"Find {safety_level.lower()} safety {selected_religion} destinations"
-
-        # Show loading indicator
-        with st.spinner("Searching for destinations matching your preferences..."):
-            # Use the religion and safety filter
-            religion_safety_df, error_message = recommend_by_safety_and_religion(
-                formatted_input,
-                df,
-                st.session_state['safety_model'],
-                st.session_state['safety_encoders'],
-                st.session_state['safety_features']
-            )
-
-            # Check if we got results or an error
-            if error_message:
-                st.warning(error_message)
-            elif religion_safety_df.empty:
-                st.warning(f"No destinations match {selected_religion} religion with {selected_safety}. Try different criteria.")
-            else:
-                # Store recommendations in session state
-                st.session_state['filtered_df'] = religion_safety_df
-                st.session_state['filter_mode'] = 'standard'
-
-                # Show filter details as title
-                st.subheader(f"Destinations: {selected_religion} with {selected_safety}")
-
-                # Clear ML filtered data if it exists
-                if 'ml_filtered_df' in st.session_state:
-                    del st.session_state['ml_filtered_df']
-    else:
-        st.error("Religion and safety model is not available. Please try again.")
-
-# Handle Cost and Tourism filter
-if cost_tourism_button:
-    if 'cost_tourism_model' not in st.session_state:
-        st.error("Cost & Tourism recommendation model is not available. Please try again.")
-    else:
-        # Show loading indicator
-        with st.spinner("Finding destinations that match your cost and tourism preferences..."):
-            # Use the cost and tourism filter
-            cost_tourism_df, error_message = recommend_by_cost_and_tourism(
-                st.session_state['cost_tourism_model'],
-                df,
-                selected_cost_level,
-                selected_tourism_level
-            )
-
-            # Check if we got results or an error
-            if error_message:
-                st.warning(error_message)
-            elif cost_tourism_df.empty:
-                st.warning(f"No destinations match {selected_cost_level} cost level and {selected_tourism_level} tourism level. Try different criteria.")
-            else:
-                # Store recommendations in session state
-                st.session_state['filtered_df'] = cost_tourism_df
-                st.session_state['filter_mode'] = 'standard'
-
-                # Show filter details as title
-                if selected_cost_level == "All" and selected_tourism_level == "All":
-                    st.subheader(f"All Destinations")
-                elif selected_cost_level == "All":
-                    st.subheader(f"Destinations with {selected_tourism_level} tourism popularity")
-                elif selected_tourism_level == "All":
-                    st.subheader(f"Destinations with {selected_cost_level} cost level")
-                else:
-                    st.subheader(f"Destinations: {selected_cost_level} cost with {selected_tourism_level} tourism popularity")
-
-                # Clear ML filtered data if it exists
-                if 'ml_filtered_df' in st.session_state:
-                    del st.session_state['ml_filtered_df']
-
-# Handle Cost and Time filter
-if cost_time_button:
-    if 'cost_time_model' not in st.session_state:
-        st.error("Cost & Time recommendation model is not available. Please try again.")
-    else:
-        # Show loading indicator
-        with st.spinner("Finding destinations that match your preferences..."):
-            # Use the cost and time filter
-            cost_time_df, error_message = recommend_by_cost_and_time(
-                st.session_state['cost_time_model'],
-                df,
-                selected_cost,
-                selected_time
-            )
-
-            # Check if we got results or an error
-            if error_message:
-                st.warning(error_message)
-            elif cost_time_df.empty:
-                st.warning(f"No destinations match {selected_cost} cost of living and {selected_time} best time to visit. Try different criteria.")
-            else:
-                # Store recommendations in session state
-                st.session_state['filtered_df'] = cost_time_df
-                st.session_state['filter_mode'] = 'standard'
-
-                # Show filter details as title
-                if selected_cost == "All" and selected_time == "All":
-                    st.subheader(f"All Destinations")
-                elif selected_cost == "All":
-                    st.subheader(f"Destinations best to visit in {selected_time}")
-                elif selected_time == "All":
-                    st.subheader(f"Destinations with {selected_cost} cost of living")
-                else:
-                    st.subheader(f"Destinations: {selected_cost} cost with {selected_time} best time to visit")
-
-                # Clear ML filtered data if it exists
-                if 'ml_filtered_df' in st.session_state:
-                    del st.session_state['ml_filtered_df']
-
-# Handle Geo Filter
-# Handle Religion and Tourism filter
-if 'religion_tourism_button' in locals() and religion_tourism_button:
-    if 'religion_tourism_model' not in st.session_state:
-        st.error("Religion & Tourism recommendation model is not available. Please try again.")
-    else:
-        # Show loading indicator
-        with st.spinner("Finding destinations that match your religion and tourism preferences..."):
-            # Use the religion and tourism filter
-            religion_tourism_df, error_message = recommend_by_religion_and_tourism(
-                st.session_state['religion_tourism_model'],
-                df,
-                selected_religion,
-                selected_tourism_level
-            )
-
-            # Check if we got results or an error
-            if error_message:
-                st.warning(error_message)
-            elif religion_tourism_df.empty:
-                st.warning(f"No destinations match {selected_religion} religion with {selected_tourism_level} tourism level. Try different criteria.")
-            else:
-                # Store recommendations in session state
-                st.session_state['filtered_df'] = religion_tourism_df
-                st.session_state['filter_mode'] = 'standard'
-
-                # Show filter details as title
-                if selected_religion == "All" and selected_tourism_level == "All":
-                    st.subheader(f"All Destinations")
-                elif selected_religion == "All":
-                    st.subheader(f"Destinations with {selected_tourism_level} tourism level")
-                elif selected_tourism_level == "All":
-                    st.subheader(f"Destinations with {selected_religion} majority")
-                else:
-                    st.subheader(f"Destinations: {selected_religion} with {selected_tourism_level} tourism level")
-
-                # Clear ML filtered data if it exists
-                if 'ml_filtered_df' in st.session_state:
-                    del st.session_state['ml_filtered_df']
-
-if 'geo_filter_button' in locals() and geo_filter_button:
-    if not location_name.strip():
-        st.warning("Please enter a location to find nearby destinations.")
-    elif 'geo_model' not in st.session_state or st.session_state['geo_model'] is None:
-        st.error("Geographical recommendation model is not available. Please try again.")
-    else:
-        # Show loading indicator
-        with st.spinner("Finding destinations near your location..."):
-            # Use the geo filter
-            geo_filtered_df, error_message = recommend_destinations_by_location(
-                st.session_state['geo_model'],
-                df,
-                location_name,
-                radius_km,
-                max_results
-            )
-
-            # Check if we got results or an error
-            if error_message:
-                st.warning(error_message)
-            elif geo_filtered_df.empty:
-                if radius_km is not None:
-                    st.warning(f"No destinations found within {radius_km} km of {location_name}. Try a larger radius or a different location.")
-                else:
-                    st.warning(f"No destinations found near {location_name}. Try a different location.")
-            else:
-                # Store recommendations in session state
-                st.session_state['filtered_df'] = geo_filtered_df
-                st.session_state['filter_mode'] = 'standard'
-
-                # Show filter details as title
-                if radius_km is not None:
-                    st.subheader(f"Destinations within {radius_km} km of {location_name}")
-                else:
-                    st.subheader(f"Nearest {len(geo_filtered_df)} destinations to {location_name}")
-
-                # Clear ML filtered data if it exists
-                if 'ml_filtered_df' in st.session_state:
-                    del st.session_state['ml_filtered_df']
-
-# Handle Location & Keywords filter
-if 'location_keyword_button' in locals() and location_keyword_button:
-    if not location_name.strip():
-        st.warning("Please enter a location to find nearby destinations.")
-    elif not keywords.strip():
-        st.warning("Please enter some keywords to help find matching destinations.")
-    elif 'location_keyword_model' not in st.session_state:
-        st.error("Location & Keywords recommendation model is not available. Please try again.")
-    else:
-        with st.spinner("Finding destinations that match your interests..."):
-            filtered_df, error_message = recommend_by_location_and_keywords(
-                st.session_state['location_keyword_model'],
-                keywords,
-                location_name,
-                num_recommendations
-            )
-
-            if error_message:
-                st.warning(error_message)
-            elif filtered_df.empty:
-                st.warning("No destinations found matching your criteria. Try different keywords or location.")
-            else:
-                st.session_state['filtered_df'] = filtered_df
-                st.session_state['filter_mode'] = 'standard'
-
-                st.subheader(f"Destinations near {location_name} matching '{keywords}'")
-
-                # Clear ML filtered data if it exists
-                if 'ml_filtered_df' in st.session_state:
-                    del st.session_state['ml_filtered_df']
-
-# Handle Country-Time-Tourists filter
-if 'country_time_tourists_button' in locals() and country_time_tourists_button:
-    if 'country_time_tourists_model' not in st.session_state:
-        st.error("Country-Time-Tourists recommendation model is not available. Please try again.")
-    else:
-        with st.spinner("Finding destinations that match your preferences..."):
-            country_time_tourists_df, error_message = recommend_by_country_time_tourists(
-                st.session_state['country_time_tourists_model'],
-                df,
-                selected_country,
-                selected_time,
-                selected_tourists
-            )
-
-            if error_message:
-                st.warning(error_message)
-            elif country_time_tourists_df.empty:
-                st.warning("No destinations match your criteria. Try different selections.")
-            else:
-                st.session_state['filtered_df'] = country_time_tourists_df
-                st.session_state['filter_mode'] = 'standard'
-
-                if selected_country == "All" and selected_time == "All" and selected_tourists == "All":
-                    st.subheader("All Destinations")
-                else:
-                    filters = []
-                    if selected_country != "All":
-                        filters.append(f"{selected_country}")
-                    if selected_time != "All":
-                        filters.append(f"{selected_time}")
-                    if selected_tourists != "All":
-                        filters.append(f"{selected_tourists} tourism")
-                    st.subheader(f"Destinations: {', '.join(filters)}")
-
-                if 'ml_filtered_df' in st.session_state:
-                    del st.session_state['ml_filtered_df']
-
-# Display results based on filter mode
-if 'filter_mode' in st.session_state:
-    # Get appropriate dataframe based on filter mode
-    if st.session_state['filter_mode'] == 'standard' and 'filtered_df' in st.session_state:
-        filtered_df = st.session_state['filtered_df']
-        is_ml_mode = False
-    elif st.session_state['filter_mode'] == 'ml' and 'ml_filtered_df' in st.session_state:
-        filtered_df = st.session_state['ml_filtered_df']
-        is_ml_mode = True
-    else:
-        filtered_df = None
-        is_ml_mode = False
-
-    # Check if we have results
-    if filtered_df is None or filtered_df.empty:
-        st.warning("No destinations match your criteria. Try adjusting your filters.")
-    else:
-        if not is_ml_mode:
-            st.subheader(f"Found {len(filtered_df)} Destinations Matching Your Preferences")
-
-        # Sorting options
-        sort_col1, sort_col2 = st.columns([1, 3])
-        with sort_col1:
-            # Determine sort options based on the data
-            sort_options = ["Name", "Rating", "Cost of Living"]
-
-            # Add Distance option if available in the DataFrame (for Geo Filter results)
-            if 'filtered_df' in st.session_state and 'distance_km' in st.session_state['filtered_df'].columns:
-                sort_options.append("Distance")
-                default_index = 3  # Default to Distance for geo results
-            else:
-                default_index = 0  # Default to Name
-
-            sort_by = st.selectbox(
-                "Sort by",
-                options=sort_options,
-                index=default_index
-            )
-
-        with sort_col2:
-            sort_order = st.radio(
-                "Order",
-                options=["Descending", "Ascending"],
-                index=0,
-                horizontal=True
-            )
-
-        # Apply sorting
-        if sort_by == "Name":
-            sort_column = "name"
-            ascending = sort_order == "Ascending"
-        elif sort_by == "Rating" and "rating" in filtered_df.columns:
-            sort_column = "rating"
-            ascending = sort_order == "Ascending"
-        elif sort_by == "Cost of Living" and "cost_numeric" in filtered_df.columns:
-            sort_column = "cost_numeric"
-            ascending = sort_order == "Ascending"
-        elif sort_by == "Distance" and "distance_km" in filtered_df.columns:
-            sort_column = "distance_km"
-            # For distance, we can respect the sort order but default to ascending
-            ascending = True if sort_order == "Ascending" else False
-        else:
-            # Fallback to name if the selected column doesn't exist
-            sort_column = "name"
-            ascending = sort_order == "Ascending"
-
-        sorted_df = filtered_df.sort_values(by=sort_column, ascending=ascending)
-
-        # Display map and statistics side by side
-        map_col, stats_col = st.columns([3, 2])
-
-        with map_col:
-            st.subheader("Destination Map")
-            try:
-                # Create and display map
-                destination_map = create_map(sorted_df)
-                folium_static(destination_map, width=800, height=500)
-            except Exception as e:
-                st.error(f"Error creating map: {str(e)}")
-
-        with stats_col:
-            st.subheader("Most Visited Destinations")
-            try:
-                # Make sure we have the tourists column in a numeric format
-                if 'approximate_annual_tourists' in df.columns:
-                    # Sort by most visited places and select the top 10
-                    top_destinations = df.nlargest(10, "approximate_annual_tourists")
-
-                    # Create figure and plot
-                    fig, ax = plt.subplots(figsize=(10, 6))
-                    bars = ax.barh(top_destinations["name"], top_destinations["approximate_annual_tourists"] / 1000000, color='skyblue')
-                    ax.set_xlabel("Number of Tourists (in millions)")
-                    ax.set_ylabel("Destination")
-                    ax.set_title("Top 10 Most Visited Destinations")
-                    ax.invert_yaxis()  # Invert y-axis to show highest at top
-                    ax.grid(axis="x", linestyle="--", alpha=0.7)
-
-                    # Add values on bars
-                    for bar in bars:
-                        width = bar.get_width()
-                        ax.text(width + 0.5, bar.get_y() + bar.get_height()/2, f'{width:.1f}M', ha='left', va='center')
-
-                    # Display the plot in Streamlit
-                    st.pyplot(fig)
-                else:
-                    st.warning("Tourist data not available for visualization")
-            except Exception as e:
-                st.error(f"Error creating visualization: {str(e)}")
-
-        # Display destination results in a grid
-        st.subheader("Recommended Destinations")
-
-        # Create rows of 3 destinations each
-        for i in range(0, len(sorted_df), 3):
-            cols = st.columns(3)
-            for j in range(3):
-                if i + j < len(sorted_df):
-                    with cols[j]:
-                        dest = sorted_df.iloc[i + j]
-                        display_destination_details(dest)
-
-        # Download results option
-        csv = sorted_df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            "Download Results as CSV",
-            data=csv,
-            file_name="recommended_destinations.csv",
-            mime="text/csv",
-        )
-
-# Footer
+# Minimalist Footer
 st.markdown("---")
-st.write("© 2023 Travel Destination Recommender | Data updated regularly")
+st.markdown(f"<div style='display:flex; justify-content:space-between; color:#66737D; font-size:0.8rem;'><div>Roamio &bull; Conversational Hybrid Travel Discovery</div><div>Catalog: {db_stats['total_destinations']} destinations across {db_stats['total_countries']} countries</div></div>", unsafe_allow_html=True)

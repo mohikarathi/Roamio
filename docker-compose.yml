@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  roamio:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: roamio_app
+    ports:
+      - "8501:8501"
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
