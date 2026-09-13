@@ -6,14 +6,15 @@
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.40%2B-FF4B4B.svg)](https://streamlit.io/)
 [![FastEmbed](https://img.shields.io/badge/FastEmbed-ONNX-orange.svg)](https://github.com/qdrant/fastembed)
 
-> **Roamio** is a curated travel guide and intelligent recommendation platform that combines conversational AI planning with multi-signal retrieval and ranking algorithms. Roamio helps travelers discover destinations through natural language conversation, dynamic preference filtering, interactive maps, and transparent match explanations.
+> **Roamio** is a curated travel guide and intelligent recommendation platform that combines conversational AI planning with multi-signal data retrieval and ranking algorithms. Roamio helps travelers discover destinations through natural language conversation, dynamic preference filtering, interactive maps, and transparent match explanations.
 
 ---
 
 ## Table of Contents
 - [Key Features](#key-features)
 - [System Architecture](#system-architecture)
-- [Recommendation Engine](#recommendation-engine)
+- [Data Retrieval & Candidate Generation](#data-retrieval--candidate-generation)
+- [Hybrid Recommendation Engine](#hybrid-recommendation-engine)
 - [Conversational Concierge](#conversational-concierge)
 - [Destination Catalog & Data Pipeline](#destination-catalog--data-pipeline)
 - [Evaluation & Benchmark Results](#evaluation--benchmark-results)
@@ -51,18 +52,23 @@
 - **Synchronized Map Pins**: Pins display destination names, photos, daily costs, and seasons on click or hover.
 - **Faceted Map Filtering**: Filter map pins dynamically by continent, category, and budget tier.
 
-### 5. Multi-Signal Hybrid Ranking
+### 5. Two-Stage Data Retrieval
+- **Structured Candidate Filtering (Stage 1)**: Rapid SQL-based candidate generation pruning the catalog by continent, season, budget, and safety criteria with automatic fallback relaxation to prevent zero-result outcomes.
+- **Dual Lexical & Dense Retrieval (Stage 2)**: Pairs fast TF-IDF keyword indexing for exact entity names and regional dishes with 384-dimensional dense semantic embeddings (`BAAI/bge-small-en-v1.5` via FastEmbed) to capture subjective travel desires.
+- **Precomputed Sub-10ms Ingestion**: Offline embedding normalization allows real-time dot-product candidate retrieval in under 10 milliseconds.
+
+### 6. Multi-Signal Hybrid Ranking
 - **Semantic Understanding**: Uses dense sentence embeddings to match conceptual travel themes (e.g., *"quiet coastal escape"* matches *"peaceful seaside village"*).
 - **Keyword Precision**: Lexical TF-IDF matching captures specific landmark names, regions, and cuisine.
 - **Financial Feasibility**: Smooth budget decay curves penalize destinations exceeding the user's budget while rewarding cost-efficient options.
 - **Seasonal Compatibility**: Prioritizes destinations during their optimal travel months and climate conditions.
 - **Quality and Safety Priors**: Factors in verified safety ratings and destination popularity metrics.
 
-### 6. Diversity Re-ranking (MMR)
+### 7. Diversity Re-ranking (MMR)
 - **Maximal Marginal Relevance**: Balances relevance score with intra-list diversity to prevent geographic clustering (e.g., preventing multiple recommendations from the same province).
 - **Diverse Discovery**: Ensures travelers explore varied options across different regions and categories.
 
-### 7. Transparent Explainability
+### 8. Transparent Explainability
 - **Grounded Match Reasons**: Explanations highlight why each destination matches specific budget targets, seasonal timing, and activity desires.
 - **Feature Contribution Breakdown**: Clear percentage breakdowns show the relative contribution of semantic match, keywords, budget, seasonality, and safety.
 
@@ -125,27 +131,49 @@
 
 ---
 
-## Recommendation Engine
+## Data Retrieval & Candidate Generation
 
-Roamio uses a two-stage retrieval and ranking pipeline designed for both accuracy and low latency:
+Roamio utilizes a two-stage data retrieval architecture designed for high candidate recall and low search latency:
 
-1. **Candidate Retrieval**:
-   - **Structured SQL Filtering**: Filters candidates based on hard constraints (continents, minimum safety rating, travel month). Includes automatic threshold relaxation if strict filters return too few candidates.
-   - **Dual Scoring**: Computes lexical relevance using TF-IDF across destination profiles, combined with dense semantic embeddings (`BAAI/bge-small-en-v1.5` via FastEmbed) to capture subjective intent.
+### Stage 1: Structured Candidate Filtering
+Rather than performing unconstrained vector searches across the entire database, the retrieval pipeline first applies structured SQL filters to enforce hard feasibility constraints:
+- **Geographic Filtering**: Narrows the search space to target continents (e.g., Europe, Asia) or specific countries when indicated.
+- **Safety Filtering**: Filters out destinations below the user's minimum safety requirement.
+- **Seasonal Alignment**: Prioritizes destinations where the selected travel month falls within peak or optimal visiting seasons.
+- **Budget Thresholding**: Computes an estimated daily budget from total trip funds and duration, filtering out destinations that exceed the budget ceiling.
+- **Soft Relaxation Fallback**: If strict constraints reduce the candidate pool below 15 destinations, the filter dynamically relaxes constraints (e.g., widening budget thresholds or neighboring seasons) to ensure the user is never left with zero results.
 
-2. **Hybrid Multi-Criteria Scoring**:
-   - **Semantic Score**: Measures alignment between the user query and destination narrative over a 384-dimensional embedding space.
-   - **Lexical Score**: Identifies direct keyword overlaps for specific attractions and regional foods.
-   - **Budget Fit**: Evaluates destination daily cost against the user's allocated daily budget, applying continuous decay penalties for over-budget options.
-   - **Seasonal Fit**: Checks destination peak and optimal months against the intended travel date.
-   - **Safety and Quality**: Incorporates baseline safety tiers and global popularity indicators.
+### Stage 2: Dual Candidate Retrieval
+Surviving candidates are concurrently evaluated by two complementary retrieval models:
+1. **Lexical Retrieval (TF-IDF)**:
+   - Evaluates token frequencies across a rich semantic document constructed for each destination (name, country, category, tags, overview narrative, attractions, famous foods, and seasons).
+   - Excels at exact keyword matching for specific landmark names (e.g., *"Colosseum"*, *"Angkor Wat"*) and regional cuisines.
+2. **Dense Semantic Retrieval (Vector Embeddings)**:
+   - Uses `BAAI/bge-small-en-v1.5` via ONNX Runtime (`fastembed`) to represent destinations and queries in a 384-dimensional continuous vector space.
+   - Resolves vocabulary mismatch by capturing conceptual synonyms (e.g., connecting a query for *"serene mountain retreat"* with a destination described as a *"peaceful alpine sanctuary"*).
+   - Uses precomputed, unit-normalized vectors so runtime retrieval reduces to a high-speed matrix dot product taking under 5 milliseconds.
 
-3. **Intra-List Diversity Optimization**:
+Both retrieval scores are normalized and passed forward to the hybrid ranking engine.
+
+---
+
+## Hybrid Recommendation Engine
+
+Once candidate records are retrieved, Roamio executes a multi-signal scoring and ranking pipeline:
+
+1. **Multi-Criteria Hybrid Scoring**:
+   - **Semantic Score**: Evaluates narrative alignment between the user's query and the destination's experiential profile.
+   - **Lexical Score**: Measures keyword overlap for specific activities, foods, and cultural attractions.
+   - **Budget Fit**: Evaluates destination daily cost against the user's daily budget target, applying continuous decay penalties for higher-cost destinations.
+   - **Seasonal Fit**: Rewards destinations during their optimal travel months and applies off-peak adjustments.
+   - **Quality and Safety**: Incorporates baseline safety tiers and global popularity indicators.
+
+2. **Intra-List Diversity Optimization (MMR)**:
    - Uses Maximal Marginal Relevance (MMR) to balance individual candidate relevance against pairwise geographic distance and category similarity.
-   - Guarantees recommendations offer geographic variety across countries and landscape types.
+   - Guarantees recommendations offer geographic variety across countries and landscape types, preventing repetitive destination clusters.
 
-4. **Explainability Generation**:
-   - Automatically constructs grounded natural-language rationales and percentage contribution weights for each candidate.
+3. **Explainability Generation**:
+   - Automatically constructs grounded natural-language rationales and percentage contribution weights for each candidate, showing exactly why each destination matched.
 
 ---
 
