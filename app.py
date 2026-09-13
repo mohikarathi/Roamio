@@ -37,8 +37,11 @@ st.markdown("""
         color: #172B3A !important;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     }
+    header[data-testid="stHeader"] {
+        background: transparent !important;
+    }
     .block-container {
-        padding-top: 1.5rem !important;
+        padding-top: 4.5rem !important;
         padding-bottom: 3rem !important;
         max-width: 1240px !important;
     }
