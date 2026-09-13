@@ -1,7 +1,7 @@
 """Pydantic data models for canonical destinations, user preferences, and recommendations."""
 
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from datetime import datetime, timezone
 
 
@@ -94,6 +94,28 @@ class RecommendationItem(BaseModel):
     lexical_similarity: float = Field(default=0.0, description="TF-IDF keyword similarity")
     explanation: RecommendationExplanation
 
+    @field_validator("destination", mode="before")
+    @classmethod
+    def coerce_destination(cls, v: Any) -> Any:
+        if hasattr(v, "model_dump"):
+            return v.model_dump()
+        if hasattr(v, "dict") and callable(v.dict):
+            return v.dict()
+        if hasattr(v, "__dict__") and not isinstance(v, dict):
+            return v.__dict__
+        return v
+
+    @field_validator("explanation", mode="before")
+    @classmethod
+    def coerce_explanation(cls, v: Any) -> Any:
+        if hasattr(v, "model_dump"):
+            return v.model_dump()
+        if hasattr(v, "dict") and callable(v.dict):
+            return v.dict()
+        if hasattr(v, "__dict__") and not isinstance(v, dict):
+            return v.__dict__
+        return v
+
 
 class RecommendationResponse(BaseModel):
     """Complete response payload containing ranked results and metadata."""
@@ -103,3 +125,29 @@ class RecommendationResponse(BaseModel):
     ranking_latency_ms: float
     diversity_metric: float = Field(default=0.0, description="Intra-list diversity score")
     applied_preferences: UserPreferences
+
+    @field_validator("applied_preferences", mode="before")
+    @classmethod
+    def coerce_preferences(cls, v: Any) -> Any:
+        if hasattr(v, "model_dump"):
+            return v.model_dump()
+        if hasattr(v, "dict") and callable(v.dict):
+            return v.dict()
+        if hasattr(v, "__dict__") and not isinstance(v, dict):
+            return v.__dict__
+        return v
+
+    @field_validator("items", mode="before")
+    @classmethod
+    def coerce_items(cls, v: Any) -> Any:
+        if isinstance(v, list):
+            new_list = []
+            for item in v:
+                if hasattr(item, "model_dump"):
+                    new_list.append(item.model_dump())
+                elif hasattr(item, "__dict__") and not isinstance(item, dict):
+                    new_list.append(item.__dict__)
+                else:
+                    new_list.append(item)
+            return new_list
+        return v

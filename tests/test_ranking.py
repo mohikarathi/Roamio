@@ -100,3 +100,43 @@ def test_recommendation_engine_end_to_end():
     top_item = resp.items[0]
     assert len(top_item.explanation.reasons) > 0
     assert top_item.rank == 1
+
+
+def test_recommendation_cross_module_reload_compatibility():
+    """Verify that RecommendationEngine and RecommendationResponse handle reloaded or foreign UserPreferences classes."""
+    from pydantic import BaseModel, Field
+    from typing import Optional, List
+    from src.data.models import RecommendationResponse
+
+    # Create a distinct class with matching fields (simulating module reload in Streamlit)
+    class SimulatedReloadedUserPreferences(BaseModel):
+        query_text: str = ""
+        budget_max_inr: Optional[float] = 50000.0
+        duration_days: Optional[int] = 5
+        travel_month: Optional[int] = None
+        continents: List[str] = Field(default_factory=list)
+        countries: List[str] = Field(default_factory=list)
+        categories: List[str] = Field(default_factory=list)
+        interests: List[str] = Field(default_factory=list)
+        disliked_features: List[str] = Field(default_factory=list)
+        min_safety: Optional[str] = "Medium"
+        user_location: Optional[str] = None
+
+    reloaded_prefs = SimulatedReloadedUserPreferences(query_text="beach resort")
+    
+    # 1. Direct validation inside RecommendationResponse
+    resp = RecommendationResponse(
+        items=[],
+        total_candidates_evaluated=10,
+        retrieval_latency_ms=1.5,
+        ranking_latency_ms=2.0,
+        applied_preferences=reloaded_prefs
+    )
+    assert resp.applied_preferences.query_text == "beach resort"
+    assert resp.applied_preferences.budget_max_inr == 50000.0
+
+    # 2. Execution via RecommendationEngine
+    engine = RecommendationEngine()
+    engine_resp = engine.recommend(reloaded_prefs, top_k=3)
+    assert len(engine_resp.items) > 0
+    assert engine_resp.applied_preferences.query_text == "beach resort"

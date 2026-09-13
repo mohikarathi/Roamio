@@ -93,11 +93,13 @@ class RecommendationEngine:
 
         t_ranking = (time.time() - t1) * 1000.0
 
+        prefs_payload = preferences.model_dump() if hasattr(preferences, "model_dump") else (preferences if isinstance(preferences, dict) else getattr(preferences, "__dict__", preferences))
+
         return RecommendationResponse(
             items=final_results,
             total_candidates_evaluated=len(candidates),
             retrieval_latency_ms=round(t_retrieval, 2),
             ranking_latency_ms=round(t_ranking, 2),
             diversity_metric=round(diversity_score, 3),
-            applied_preferences=preferences
+            applied_preferences=prefs_payload
         )
