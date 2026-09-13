@@ -558,8 +558,9 @@ def render_folium_map(dest_list, active_id=None, height=480, zoom_start=2):
 
     for d in valid_dests:
         is_active = (d.destination_id == active_id)
-        img_web = get_image_web_url(d.thumbnail_url or d.image_url)
-        img_tag = f'<img src="{img_web}" style="width:100%; height:110px; object-fit:cover; border-radius:6px; margin-bottom:8px; border:1px solid #E4E0D8;" />' if img_web else ""
+        img_web = d.thumbnail_url or d.image_url or ""
+        fallback_map_img = "https://images.unsplash.com/photo-1488646953014-85cb44e25828?w=300"
+        img_tag = f'<img src="{img_web}" onerror="this.onerror=null; this.src=\'{fallback_map_img}\';" style="width:100%; height:110px; object-fit:cover; border-radius:6px; margin-bottom:8px; border:1px solid #E4E0D8;" />' if img_web else ""
         seasons_info = ', '.join(d.best_seasons[:2]) if d.best_seasons else 'Year-round'
 
         desc_text = d.description or ""
@@ -670,15 +671,15 @@ def render_destination_detail_modal(dest: Destination, explanation=None):
     with st.container():
         st.markdown("""<div class="detail-container">""", unsafe_allow_html=True)
         
-        img_web = get_image_web_url(dest.thumbnail_url or dest.image_url)
-        img_fallback = get_image_data_uri(dest.thumbnail_url or dest.image_url)
-        author_text = dest.photo_author or "Unsplash Contributor"
+        img_web = dest.thumbnail_url or dest.image_url or "https://images.unsplash.com/photo-1488646953014-85cb44e25828?auto=format&fit=crop&w=800&h=450&q=80"
+        fallback_hero = "https://images.unsplash.com/photo-1488646953014-85cb44e25828?auto=format&fit=crop&w=800&h=450&q=80"
+        author_text = dest.photo_author or "Travel Contributor"
         author_link = dest.photo_author_url or "https://unsplash.com"
         
         modal_html = (
             f'<div class="detail-hero-box">'
-            f'<img class="detail-hero-img" src="{img_web}" onerror="this.onerror=null; this.src=\'{img_fallback}\';" alt="{dest.name}" />'
-            f'<div class="photo-credit">Photo by <a href="{author_link}" target="_blank">{author_text}</a> on {dest.image_provider or "Unsplash"}</div>'
+            f'<img class="detail-hero-img" src="{img_web}" onerror="this.onerror=null; this.src=\'{fallback_hero}\';" alt="{dest.name}" />'
+            f'<div class="photo-credit">Photo by <a href="{author_link}" target="_blank">{author_text}</a> on {dest.image_provider or "Wikimedia Commons"}</div>'
             f'</div>'
             f'<h2 style="margin:0 0 0.5rem 0; color:#172B3A;">{dest.name}, {dest.country}</h2>'
             f'<div style="color:#66737D; font-size:0.95rem; margin-bottom:1rem;">'
@@ -729,14 +730,14 @@ def render_destination_card(
     gallery = get_destination_gallery(d)
 
     tiles = []
+    fallback_tile = "https://images.unsplash.com/photo-1488646953014-85cb44e25828?auto=format&fit=crop&w=480&h=320&q=80"
     for g in gallery[:4]:
-        author = g.get("author", "Unsplash")
+        author = g.get("author", "Travel Contributor")
         alt = g.get("alt", f"{d.name}, {d.country}")
-        web_uri = g.get("web_url") or g.get("data_uri", "")
-        fallback_uri = g.get("data_uri", "")
+        img_src = g.get("url") or g.get("web_url") or fallback_tile
         tile_html = (
             f'<div class="gallery-tile">'
-            f'<img class="gallery-img" src="{web_uri}" onerror="this.onerror=null; this.src=\'{fallback_uri}\';" alt="{alt}" title="{alt}" />'
+            f'<img class="gallery-img" src="{img_src}" onerror="this.onerror=null; this.src=\'{fallback_tile}\';" alt="{alt}" title="{alt}" />'
             f'<div class="gallery-tile-author">{author}</div>'
             f'</div>'
         )

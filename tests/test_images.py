@@ -127,7 +127,7 @@ def test_destination_gallery_multi_images():
             assert "data_uri" in img
             assert img["data_uri"].startswith("data:image/jpeg;base64,")
             assert "web_url" in img
-            assert img["web_url"].startswith("/app/static/images/")
+            assert img["web_url"].startswith("http://") or img["web_url"].startswith("https://")
             assert "author" in img
             assert "alt" in img
 
@@ -138,8 +138,7 @@ def test_get_image_web_url():
     dests = get_all_destinations()
     assert len(dests) > 0
     web_url = get_image_web_url(dests[0].thumbnail_url or dests[0].image_url)
-    assert web_url.startswith("/app/static/images/")
-    assert web_url.endswith(".jpg")
+    assert web_url.startswith("http://") or web_url.startswith("https://")
 
 
 def test_destination_galleries_catalog_and_european_accuracy():

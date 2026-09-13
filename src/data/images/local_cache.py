@@ -27,21 +27,15 @@ def get_local_image_path(url: Optional[str]) -> Optional[Path]:
 
 
 def get_image_web_url(url: Optional[str]) -> str:
-    """Return local static web path (/app/static/images/{hash}.jpg) for zero-latency browser rendering."""
+    """Return publicly reachable web URL for image.
+    
+    Direct HTTPS CDN URLs (Wikimedia, Unsplash) load natively in all browsers and avoid
+    reverse-proxy 303 auth redirects on Streamlit Community Cloud.
+    """
     if not url:
         return ""
-    local_path = get_local_image_path(url)
-    if local_path and local_path.exists():
-        # Ensure file exists in static dir
-        static_target = STATIC_IMAGES_DIR / local_path.name
-        if not static_target.exists():
-            try:
-                STATIC_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
-                import shutil
-                shutil.copyfile(local_path, static_target)
-            except Exception:
-                pass
-        return f"/app/static/images/{local_path.name}"
+    if url.startswith("http://") or url.startswith("https://"):
+        return url
     return url
 
 
