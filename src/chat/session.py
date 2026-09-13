@@ -136,11 +136,19 @@ class ChatSession:
         )
 
         # 5. Run recommendation engine
-        rec_response = self.engine.recommend(
-            preferences=self.preferences,
-            top_k=5 + self.alternatives_offset,
-            apply_diversity=True
-        )
+        try:
+            rec_response = self.engine.recommend(
+                preferences=self.preferences,
+                top_k=5 + self.alternatives_offset,
+                apply_diversity=True
+            )
+        except Exception:
+            self.engine = RecommendationEngine()
+            rec_response = self.engine.recommend(
+                preferences=self.preferences,
+                top_k=5 + self.alternatives_offset,
+                apply_diversity=True
+            )
 
         # Offset items if alternatives requested
         if self.alternatives_offset > 0 and len(rec_response.items) > self.alternatives_offset:

@@ -471,7 +471,7 @@ st.markdown("""
 
 
 @st.cache_resource
-def get_recommendation_engine():
+def get_recommendation_engine(version: str = "v2.2.1"):
     """Cache recommendation engine instance across user sessions."""
     return RecommendationEngine()
 
@@ -488,13 +488,22 @@ def get_cached_destinations():
     return get_all_destinations()
 
 
-# Initialize state
-engine = get_recommendation_engine()
+# Initialize state with self-healing fallback for cross-version reloads
+try:
+    engine = get_recommendation_engine(version="v2.2.1")
+except Exception:
+    st.cache_resource.clear()
+    engine = RecommendationEngine()
+
 db_stats = get_cached_db_stats()
 all_destinations = get_cached_destinations()
 
 if "chat_session" not in st.session_state:
     st.session_state["chat_session"] = ChatSession(engine=engine)
+else:
+    # Ensure existing session adopts refreshed engine instance
+    st.session_state["chat_session"].engine = engine
+
 if "explore_response" not in st.session_state:
     st.session_state["explore_response"] = None
 if "selected_dest_id" not in st.session_state:
@@ -939,7 +948,14 @@ with tab_explore:
             continents=[sel_continent] if sel_continent != "All" else [],
             categories=[sel_category] if sel_category != "All" else []
         )
-        st.session_state["explore_response"] = engine.recommend(user_prefs, top_k=6, apply_diversity=True)
+        try:
+            st.session_state["explore_response"] = engine.recommend(user_prefs, top_k=6, apply_diversity=True)
+        except Exception:
+            st.cache_resource.clear()
+            engine = RecommendationEngine()
+            if "chat_session" in st.session_state:
+                st.session_state["chat_session"].engine = engine
+            st.session_state["explore_response"] = engine.recommend(user_prefs, top_k=6, apply_diversity=True)
 
     rec_res: RecommendationResponse = st.session_state["explore_response"]
 
