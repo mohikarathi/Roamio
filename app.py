@@ -43,7 +43,10 @@ st.markdown("""
     .block-container {
         padding-top: 4.5rem !important;
         padding-bottom: 3rem !important;
-        max-width: 1240px !important;
+        padding-left: 2rem !important;
+        padding-right: 2rem !important;
+        max-width: 100% !important;
+        width: 100% !important;
     }
 
     /* Headings and Base Typography */
