@@ -512,10 +512,6 @@ st.markdown("""
         <span class="brand-edition-chip">Curated World Guide</span>
     </div>
     <div class="nav-pills-wrap">
-        <div class="nav-pill">
-            <span class="nav-pill-dot"></span>
-            <span>252 Destinations</span>
-        </div>
         <div class="nav-pill nav-pill-accent">
             <span>AI Concierge</span>
         </div>
