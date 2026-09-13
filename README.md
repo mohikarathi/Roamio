@@ -1,4 +1,4 @@
-# ✈️ Roamio — Conversational Hybrid Travel Recommendation System
+# Roamio — Curated Travel Guide and Recommendation System
 
 [![Roamio CI](https://github.com/mohikarathi/Roamio/actions/workflows/ci.yml/badge.svg)](https://github.com/mohikarathi/Roamio/actions/workflows/ci.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
@@ -6,53 +6,69 @@
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.40%2B-FF4B4B.svg)](https://streamlit.io/)
 [![FastEmbed](https://img.shields.io/badge/FastEmbed-ONNX-orange.svg)](https://github.com/qdrant/fastembed)
 
-> **Roamio** is an intelligent, conversational hybrid travel recommendation system that bridges natural language conversational planning with deterministic, multi-signal recommendation algorithms. Evolving from a static single-file prototype into an end-to-end ML application, Roamio demonstrates modern data engineering, lexical and dense retrieval, multi-criteria ranking, diversity optimization, and explainable AI.
+> **Roamio** is a curated travel guide and intelligent recommendation platform that combines conversational AI planning with multi-signal retrieval and ranking algorithms. Roamio helps travelers discover destinations through natural language conversation, dynamic preference filtering, interactive maps, and transparent match explanations.
 
 ---
 
-## 📑 Table of Contents
-- [The Problem & Motivation](#-the-problem--motivation)
-- [System Architecture](#-system-architecture)
-- [Data Pipeline & Multi-Source Provenance](#-data-pipeline--multi-source-provenance)
-- [Mathematical Foundations & ML Modeling](#-mathematical-foundations--ml-modeling)
-  - [Lexical Retrieval (TF-IDF)](#1-lexical-retrieval-tf-idf)
-  - [Dense Semantic Search (Sentence Embeddings)](#2-dense-semantic-search-sentence-embeddings)
-  - [Two-Stage Retrieval Pipeline](#3-two-stage-retrieval-pipeline)
-  - [Multi-Signal Hybrid Ranking](#4-multi-signal-hybrid-ranking)
-  - [Maximal Marginal Relevance (MMR) for Diversity](#5-maximal-marginal-relevance-mmr-for-diversity)
-- [Explainability Engine](#-explainability-engine)
-- [Conversational Layer & Anti-Hallucination Guardrails](#-conversational-layer--anti-hallucination-guardrails)
-- [Empirical Evaluation & Ablation Study](#-empirical-evaluation--ablation-study)
-- [Error Analysis & Insights](#-error-analysis--insights)
-- [Project Structure](#-project-structure)
-- [Installation & Quickstart](#-installation--quickstart)
-- [Docker Deployment](#-docker-deployment)
-- [The ML Engineering Story (Interview Q&A)](#-the-ml-engineering-story)
+## Table of Contents
+- [Key Features](#key-features)
+- [System Architecture](#system-architecture)
+- [Recommendation Engine](#recommendation-engine)
+- [Conversational Concierge](#conversational-concierge)
+- [Destination Catalog & Data Pipeline](#destination-catalog--data-pipeline)
+- [Evaluation & Benchmark Results](#evaluation--benchmark-results)
+- [Project Structure](#project-structure)
+- [Installation & Quickstart](#installation--quickstart)
+- [Docker Deployment](#docker-deployment)
+- [Automated Tests](#automated-tests)
+- [Design Decisions](#design-decisions)
+- [License](#license)
 
 ---
 
-## 🎯 The Problem & Motivation
+## Key Features
 
-Most travel recommendation platforms suffer from one of two extremes:
-1. **Rigid Boolean Search Filters**: Require users to manually check dozens of filter dropdowns. Searching for a *"peaceful mountain retreat with temples and great local food under ₹70,000"* requires impossible combinations that frequently result in **0 results** if a single rigid tag misses.
-2. **Unconstrained LLM Chatbots**: Freeform chatbots (e.g. vanilla ChatGPT wrappers) sound persuasive but hallucinate fake prices, recommend non-existent itineraries, have no access to catalog inventory, and cannot deterministically rank candidates according to mathematical scoring criteria.
+### 1. Conversational AI Concierge
+- **Natural Language Trip Planning**: Chat naturally about desired travel experiences, activities, budgets, and dates (e.g., *"Find a relaxing beach escape in Southeast Asia under 60,000 INR for 7 days"*).
+- **Preference Extraction**: Automatically extracts budget limits, trip durations, target months, continent preferences, and activity interests from user messages.
+- **Conversational Refinement**: Refine search parameters turn-by-turn (e.g., *"Make it cheaper"*, *"Show me cultural options instead"*).
+- **Side-by-Side Comparisons**: Ask to compare destinations (e.g., *"Compare 1 and 2"*) to view a comparative table contrasting daily costs, safety ratings, best seasons, and match scores.
+- **Explainable Ranking ("Why #1?")**: Ask *"Why did you rank this first?"* to receive an itemized breakdown of why a destination matched your query.
+- **Zero-Network Fallback**: Features an offline rule-based parser that provides recommendation extraction and formatting even if external LLM APIs are unavailable.
 
-### The Original Roamio Baseline vs. Roamio 2.0
-In its initial form, Roamio relied on:
-- A single static Excel spreadsheet of 209 destinations across only 21 countries with 24% missing descriptions.
-- A multi-class `LogisticRegression` model attempting to classify 208 unique destination names from `(Country, Category)`. **This achieved an empirical accuracy of 0.0%**, as destination recommendation was fundamentally misformulated as multi-class classification rather than **candidate retrieval and ranking**.
-- Fragmented, ad-hoc pairwise filter scripts that broke candidate diversity.
+### 2. Destination Explorer & Search
+- **Multi-Parameter Filtering**: Filter destinations by freeform search queries, total budget, trip duration, continents, and travel categories.
+- **Real-Time Recommendation Scoring**: Evaluates candidate destinations against constraints and ranks them by relevance.
+- **Detailed Modal Inspection**: Click any destination card to open a full overview displaying cultural significance, signature local foods, top activities, estimated daily costs, and climate suitability.
 
-**Roamio 2.0 transforms this codebase into a production-style hybrid system:**
-- **Multi-source Data Lake & Canonical SQLite DB**: Enriched with curated Wikidata & GeoNames entities across 41 countries with full provenance.
-- **Two-Stage Dual Retrieval**: Prunes candidate space with structured SQL filtering, then retrieves candidates using both lexical **TF-IDF** and **Dense Sentence Transformers** (`bge-small-en-v1.5`).
-- **Principled Multi-Feature Scorer**: Blends semantic similarity, keyword overlap, continuous budget decay curves, seasonal alignment, and quality priors.
-- **Maximal Marginal Relevance (MMR)**: Re-ranks top candidates to eliminate repetitive geographic clusters.
-- **Conversational Concierge Layer**: Uses an LLM (Gemini API with an offline fallback parser) strictly as a bidirectional natural language interface. **The LLM never invents recommendations**; it translates user intent into structured constraints and formats deterministic recommendation features into natural conversational responses.
+### 3. Editorial Multi-Photo Galleries
+- **Landscape Photography Strip**: Every destination card features a curated four-photo landscape gallery strip showcasing landmarks, beaches, nature, and cultural sites.
+- **Direct CDN Delivery**: High-resolution imagery delivered directly via public CDNs (Wikimedia Commons and Unsplash) for fast, reliable browser loading.
+- **Photographer Attribution**: Transparent attribution links to source photographers and platforms.
+
+### 4. Interactive Spatial Map Explorer
+- **Global Leaflet / Folium Map**: Interactive world map displaying destination markers across continents.
+- **Synchronized Map Pins**: Pins display destination names, photos, daily costs, and seasons on click or hover.
+- **Faceted Map Filtering**: Filter map pins dynamically by continent, category, and budget tier.
+
+### 5. Multi-Signal Hybrid Ranking
+- **Semantic Understanding**: Uses dense sentence embeddings to match conceptual travel themes (e.g., *"quiet coastal escape"* matches *"peaceful seaside village"*).
+- **Keyword Precision**: Lexical TF-IDF matching captures specific landmark names, regions, and cuisine.
+- **Financial Feasibility**: Smooth budget decay curves penalize destinations exceeding the user's budget while rewarding cost-efficient options.
+- **Seasonal Compatibility**: Prioritizes destinations during their optimal travel months and climate conditions.
+- **Quality and Safety Priors**: Factors in verified safety ratings and destination popularity metrics.
+
+### 6. Diversity Re-ranking (MMR)
+- **Maximal Marginal Relevance**: Balances relevance score with intra-list diversity to prevent geographic clustering (e.g., preventing multiple recommendations from the same province).
+- **Diverse Discovery**: Ensures travelers explore varied options across different regions and categories.
+
+### 7. Transparent Explainability
+- **Grounded Match Reasons**: Explanations highlight why each destination matches specific budget targets, seasonal timing, and activity desires.
+- **Feature Contribution Breakdown**: Clear percentage breakdowns show the relative contribution of semantic match, keywords, budget, seasonality, and safety.
 
 ---
 
-## 🏗️ System Architecture
+## System Architecture
 
 ```
                                   USER
@@ -68,7 +84,7 @@ In its initial form, Roamio relied on:
                        │  Conversational Layer │
                        │ (Gemini / Rule Parser)│
                        └───────────┬───────────┘
-                                   │  Extracts Structured Intent
+                                   │  Extracts Structured Preferences
                                    ▼  (budget, duration, season, interests)
                        ┌───────────────────────┐
                        │  Recommendation API   │
@@ -79,16 +95,16 @@ In its initial form, Roamio relied on:
 ┌──────────────┐          ┌─────────────────┐         ┌─────────────────┐
 │  Structured  │          │ TF-IDF Lexical  │         │ Dense Semantic  │
 │  Candidate   │          │    Retrieval    │         │   Embeddings    │
-│  Filtering   │          │ (Lexical Match) │         │ (bge-small-en)  │
+│  Filtering   │          │ (Keyword Match) │         │ (bge-small-en)  │
 └──────┬───────┘          └────────┬────────┘         └────────┬────────┘
        │                           │                           │
        └───────────────────────────┼───────────────────────────┘
                                    ▼
                        ┌───────────────────────┐
                        │    Hybrid Ranking     │
-                       │ w1*Dense + w2*Lexical │
-                       │ + w3*Pref + w4*Budget │
-                       │ + w5*Season + w6*Qual │
+                       │ Dense + Lexical Match │
+                       │ + Budget + Season Fit │
+                       │ + Safety + Popularity │
                        └───────────┬───────────┘
                                    ▼
                        ┌───────────────────────┐
@@ -98,322 +114,203 @@ In its initial form, Roamio relied on:
                                    ▼
                        ┌───────────────────────┐
                        │ Explainability Engine │
-                       │ (Attribution Vectors) │
+                       │ (Feature Attribution) │
                        └───────────┬───────────┘
                                    ▼
                        ┌───────────────────────┐
-                       │ Top-K + Reasons + LLM │
+                       │ Top-K + Explanations  │
                        │  Grounded Response    │
                        └───────────────────────┘
 ```
 
 ---
 
-## 🗄️ Data Pipeline & Multi-Source Provenance
+## Recommendation Engine
 
-Roamio moves away from reading static Excel spreadsheets at runtime. A reproducible data engineering pipeline (`python -m src.data.pipeline`) automates ingestion, deduplication, validation, and precomputation:
+Roamio uses a two-stage retrieval and ranking pipeline designed for both accuracy and low latency:
 
-```
-  Existing destinations.xlsx (Seed)
-               +
-  Wikidata / Wikipedia API (Curated Global Destinations)
-               +
-  GeoNames / OpenStreetMap Metadata (Coords, Climate, Country)
-               │
-               ▼
-      data/raw/ (JSON/CSV with Provenance Metadata)
-               │
-               ▼
-      src/data/cleaner.py (Normalize & Sanitize)
-               │
-               ▼
-      src/data/entity_resolution.py (Canonical IDs, Fuzzy Match)
-               │
-               ▼
-      src/data/validator.py (Pydantic Schema Validation)
-               │
-               ▼
-      SQLite Database: data/roamio.db
-      (destinations, categories, climate, sources)
-               │
-               ▼
-      src/retrieval/corpus_builder.py
-      (Rich semantic document representation per destination)
-               │
-       ┌───────┴───────┐
-       ▼               ▼
-  Precomputed     Precomputed
-  TF-IDF Matrix   Dense Embeddings (Cache: data/processed/)
-```
+1. **Candidate Retrieval**:
+   - **Structured SQL Filtering**: Filters candidates based on hard constraints (continents, minimum safety rating, travel month). Includes automatic threshold relaxation if strict filters return too few candidates.
+   - **Dual Scoring**: Computes lexical relevance using TF-IDF across destination profiles, combined with dense semantic embeddings (`BAAI/bge-small-en-v1.5` via FastEmbed) to capture subjective intent.
 
-### Data Sources & Provenance Matrix
+2. **Hybrid Multi-Criteria Scoring**:
+   - **Semantic Score**: Measures alignment between the user query and destination narrative over a 384-dimensional embedding space.
+   - **Lexical Score**: Identifies direct keyword overlaps for specific attractions and regional foods.
+   - **Budget Fit**: Evaluates destination daily cost against the user's allocated daily budget, applying continuous decay penalties for over-budget options.
+   - **Seasonal Fit**: Checks destination peak and optimal months against the intended travel date.
+   - **Safety and Quality**: Incorporates baseline safety tiers and global popularity indicators.
 
-| Source | Identifier / Type | Scope | Usage & License | Update Strategy |
-| :--- | :--- | :--- | :--- | :--- |
-| **Baseline Seed** | `attached_assets/destinations.xlsx` | 209 destinations across 21 countries | Historic seed data; preserved for baseline benchmarking | Static baseline |
-| **Wikidata / OpenTravel** | Wikidata QIDs (e.g. `Q34647` Kyoto) | ~30 world icons across Asia, Europe, Americas, Africa | Curated coordinates, UNESCO tags, cultural heritage | Ingested via pipeline |
-| **GeoNames / Open-Meteo** | Spatial Coordinates & Monthly Climate | Global climate envelopes & coordinates | CC-BY / Open Access | Cached in SQLite |
+3. **Intra-List Diversity Optimization**:
+   - Uses Maximal Marginal Relevance (MMR) to balance individual candidate relevance against pairwise geographic distance and category similarity.
+   - Guarantees recommendations offer geographic variety across countries and landscape types.
 
-### Entity Resolution
-Different sources reference destinations with slight orthographic or administrative variations (`Kyoto`, `Kyoto City`, `Kyoto, Japan`). The `EntityResolver` performs:
-1. **Authoritative External ID Match**: Exact matches on Wikidata QIDs.
-2. **Normalized Name & Country Match**: Strips noise words (`City`, `Province`, `Prefecture`, diacritics).
-3. **Spatial Proximity & Token Set Similarity**: If Haversine distance $< 35\text{ km}$ and token Jaccard similarity $\ge 0.65$, records are merged into a canonical entity, uniting activity tags and preserving the richer description.
+4. **Explainability Generation**:
+   - Automatically constructs grounded natural-language rationales and percentage contribution weights for each candidate.
 
 ---
 
-## 📐 Mathematical Foundations & ML Modeling
+## Conversational Concierge
 
-### 1. Lexical Retrieval (TF-IDF)
-The lexical retriever indexes rich multi-field semantic documents encompassing destination name, country, category, tags, narrative overview, activities, famous foods, and seasons:
+The conversational interface acts as an intelligent layer above the recommendation engine:
 
-$$\text{TF-IDF}(t, d, D) = \text{TF}(t, d) \times \left( \ln\left(\frac{1 + |D|}{1 + |\{d \in D : t \in d\}|}\right) + 1 \right)$$
-
-Cosine similarity between the query $\vec{q}$ and candidate document $\vec{d}$:
-
-$$\text{Sim}_{\text{lexical}}(\vec{q}, \vec{d}) = \frac{\vec{q} \cdot \vec{d}}{\|\vec{q}\|_2 \|\vec{d}\|_2}$$
-
-### 2. Dense Semantic Search (Sentence Embeddings)
-To resolve vocabulary mismatch (e.g. query *"serene alpine retreat"* vs document *"peaceful mountain resort"*), Roamio precomputes 384-dimensional dense vectors using `BAAI/bge-small-en-v1.5` via ONNX Runtime (`fastembed`):
-
-$$\vec{e}_d = \frac{\text{Transformer}(d)}{\|\text{Transformer}(d)\|_2}, \quad \vec{e}_q = \frac{\text{Transformer}(q)}{\|\text{Transformer}(q)\|_2}$$
-
-Because vectors are unit-normalized, cosine similarity reduces to a fast dot product:
-
-$$\text{Sim}_{\text{dense}}(\vec{q}, \vec{d}) = \vec{e}_q \cdot \vec{e}_d$$
-
-### 3. Two-Stage Retrieval Pipeline
-Rather than performing unconstrained semantic search over the entire universe:
-- **Stage 1 (Structured Candidate Filtering)**: Fast SQL queries prune candidate space based on hard constraints (e.g. continent, safety rating, travel month). A soft-relaxation fallback guarantees recall never drops to zero.
-- **Stage 2 (Dual Scoring)**: Evaluates both $\text{Sim}_{\text{dense}}$ and $\text{Sim}_{\text{lexical}}$ over the filtered candidate pool in under $10\text{ ms}$.
-
-### 4. Multi-Signal Hybrid Ranking
-A destination cannot be recommended solely on text similarity; budget and seasonality are critical feasibility constraints. The `HybridScorer` computes normalized signals $[0.0, 1.0]$:
-
-$$\text{Final Score}(d) = w_{\text{dense}} S_{\text{dense}} + w_{\text{tfidf}} S_{\text{tfidf}} + w_{\text{pref}} S_{\text{pref}} + w_{\text{budget}} S_{\text{budget}} + w_{\text{season}} S_{\text{season}} + w_{\text{qual}} S_{\text{qual}}$$
-
-#### Continuous Budget Decay Curve
-Given user trip budget $B$ and duration $D$, the daily budget target is $d = 0.80 \cdot B / D$. If the destination estimated daily cost is $c$:
-- If $c \le d$: $S_{\text{budget}} = 1.0 - 0.15 \cdot \frac{d - c}{d}$
-- If $c > d$: $S_{\text{budget}} = \exp\left(-2.5 \cdot \frac{c - d}{d}\right)$
-
-This ensures destinations slightly above budget receive a modest penalty, while destinations costing $2\times$ the target decay toward zero.
-
-### 5. Maximal Marginal Relevance (MMR) for Diversity
-Recommending 5 destinations all located within the same province creates a poor user experience. Roamio balances relevance with diversity using MMR:
-
-$$\text{Next} = \arg\max_{d_i \in R \setminus S} \left[ \lambda \cdot \text{Score}(d_i) - (1 - \lambda) \cdot \max_{d_j \in S} \text{Sim}_{\text{inter}}(d_i, d_j) \right]$$
-
-where $\text{Sim}_{\text{inter}}$ measures pairwise geographic Haversine distance, country collision, and category overlap. Setting $\lambda = 0.75$ provides an optimal balance between topical precision and regional variety.
+- **Strict Anti-Hallucination Design**: The language model never invents destinations, prices, or rankings. The recommendation engine deterministically selects and scores all candidates from the catalog; the LLM formats the results and handles conversational dialogue.
+- **Multi-Turn State Tracking**: The `ChatSession` maintains conversation history and updates cumulative user preferences across turns.
+- **Comparative Analysis**: Parses comparison queries to render structured comparative matrices directly in chat.
+- **Offline Reliability**: When API keys are not configured, Roamio defaults to a deterministic intent-extraction parser and template formatter, ensuring complete functionality without internet-dependent LLM services.
 
 ---
 
-## 🔍 Explainability Engine
+## Destination Catalog & Data Pipeline
 
-Every recommendation returns verified, evidence-based rationales grounded strictly in underlying feature vectors:
+Roamio includes a structured destination catalog stored in SQLite (`data/roamio.db`) with full provenance metadata:
 
-```json
-{
-  "rank": 1,
-  "destination": "Ella, Sri Lanka",
-  "score": 0.6584,
-  "reasons": [
-    "Strong semantic alignment with your preferred travel experience",
-    "Direct match for your interests: hiking, peaceful",
-    "Comfortably within budget (Est. ₹2,400/day vs ₹7,000/day target)"
-  ],
-  "feature_contributions": {
-    "Semantic Match": 0.616,
-    "Keyword Match": 0.071,
-    "Preferences": 0.750,
-    "Budget Fit": 0.900,
-    "Season Fit": 0.700,
-    "Quality/Safety": 0.820
-  }
-}
-```
-In the Streamlit interface, users can expand any card to view the exact percentage contribution of each signal.
+- **250+ Curated Destinations**: Spanning 41 countries across Asia, Europe, the Americas, Africa, and Oceania.
+- **Rich Metadata Fields**: Each destination includes canonical coordinates, climate and seasonality, estimated daily costs in INR, local currency, primary and secondary categories, narrative overviews, top activities, famous local foods, and safety tiers.
+- **Automated Data Pipeline**: A reproducible pipeline (`python -m src.data.pipeline`) handles data normalization, entity resolution, schema validation via Pydantic, SQLite population, and embedding precomputation.
 
 ---
 
-## 💬 Conversational Layer & Anti-Hallucination Guardrails
+## Evaluation & Benchmark Results
 
-The conversational interface supports natural, multi-turn trip planning:
-- **Intent Extraction**: Translates freeform queries into validated `UserPreferences` objects (`budget_max_inr`, `duration_days`, `travel_month`, `interests`, `dislikes`).
-- **Conversational Refinement**:
-  - *"Actually, make it cheaper"* $\rightarrow$ reduces budget threshold and triggers reranking.
-  - *"Why did you rank Rio de Janeiro at #1?"* $\rightarrow$ inspects feature attribution vectors to explain the ranking decision.
-  - *"Compare 1 and 2"* $\rightarrow$ formats a side-by-side comparative feature matrix.
-- **Strict Anti-Hallucination Guarantee**: The LLM operates **around** the recommendation engine, not within it. It never selects candidate rankings or invents destinations. If external API keys are unavailable, Roamio seamlessly falls back to a deterministic rule-based parser with zero degradation of recommendation quality.
+Roamio includes an automated evaluation suite (`src/evaluation/`) benchmarking retrieval and ranking performance across diverse travel personas with curated ground truth.
 
----
-
-## 📊 Empirical Evaluation & Ablation Study
-
-Roamio features an offline evaluation harness (`src/evaluation/`) benchmarking models across 8 realistic travel personas with curated ground truth.
-
-### Benchmark Ablation Results
-
-| Model / Configuration | Precision@5 | Recall@10 | NDCG@10 | MRR | Diversity (ILD) | Latency (ms) |
+| Configuration | Precision@5 | Recall@10 | NDCG@10 | MRR | Diversity (ILD) | Latency |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **TF-IDF Baseline** | 0.2500 | 0.3438 | 0.3024 | 0.4458 | 0.8562 | **1.07 ms** |
-| **Dense Embeddings** | 0.4750 | 0.6125 | 0.6149 | 0.7333 | 0.8321 | 4.42 ms |
-| **Two-Stage Retrieval** | 0.4250 | 0.6000 | 0.6169 | 0.8333 | 0.7803 | 8.72 ms |
-| **Hybrid (No Diversity)** | **0.5500** | **0.7312** | **0.7585** | **1.0000** | 0.8614 | 9.86 ms |
-| **Roamio Hybrid + MMR** | 0.5000 | 0.5750 | 0.6694 | **1.0000** | **0.8858** | 13.37 ms |
+| TF-IDF Baseline | 0.2500 | 0.3438 | 0.3024 | 0.4458 | 0.8562 | ~1.1 ms |
+| Dense Embeddings | 0.4750 | 0.6125 | 0.6149 | 0.7333 | 0.8321 | ~4.4 ms |
+| Two-Stage Retrieval | 0.4250 | 0.6000 | 0.6169 | 0.8333 | 0.7803 | ~8.7 ms |
+| Hybrid (No Diversity) | 0.5500 | 0.7312 | 0.7585 | 1.0000 | 0.8614 | ~9.9 ms |
+| Roamio Hybrid + MMR | 0.5000 | 0.5750 | 0.6694 | 1.0000 | 0.8858 | ~13.4 ms |
 
-### Key Findings:
-1. **Dense vs. Lexical (+103% NDCG@10 gain)**: Dense embeddings capture conceptual synonyms (*"alpine retreat"* matches *"mountain resort"*), whereas TF-IDF misses unless exact tokens overlap.
-2. **Two-Stage Filtering (+13% MRR gain)**: Pruning candidates by continent and safety eliminates geographically invalid results.
-3. **Hybrid Scoring Engine (MRR = 1.0000)**: Integrating continuous budget decay curves and seasonal alignment guarantees that a highly relevant destination appears at Rank 1 for every benchmark query.
-4. **MMR Diversity (+3% ILD gain)**: Enforces catalog variety, preventing recommendations from collapsing into a single geographic region.
-
----
-
-## 🔬 Error Analysis & Insights
-
-- **Where TF-IDF Outperforms Embeddings**: Queries featuring rare proper nouns (e.g. *"Kinkaku-ji"* or *"Matterhorn"*) benefit from TF-IDF's exact token matching, where embeddings can sometimes suffer from semantic drift.
-- **Where Pure Embeddings Fail**: Dense embeddings are budget-blind. A user requesting a *"luxury beachfront overwater villa"* will retrieve the Maldives even if their budget is ₹20,000. Hybrid scoring fixes this by penalizing budget-incompatible candidates.
-- **The Diversity vs. Precision Trade-Off**: Increasing MMR diversity ($\lambda \rightarrow 0.5$) slightly reduces top-5 precision in exchange for broader regional exploration.
+### Key Takeaways:
+- **Dense vs. Lexical Search**: Dense embeddings improve semantic retrieval by matching conceptual synonyms (*"peaceful getaway"* matching *"serene retreat"*).
+- **Hybrid Scoring**: Blending text similarity with budget decay and seasonal fit achieves an MRR of 1.0000 across benchmark personas, ensuring a viable destination always ranks at #1.
+- **MMR Diversity**: Increases intra-list diversity, ensuring recommendations span multiple regions and travel styles.
 
 ---
 
-## 📂 Project Structure
+## Project Structure
 
 ```
 Roamio/
 ├── data/
-│   ├── raw/                       # Immutable raw JSON/CSV data with provenance
+│   ├── raw/                       # Immutable raw destination datasets with provenance
 │   ├── processed/                 # Cached TF-IDF & dense embeddings (.npy, .pkl)
 │   ├── metadata/                  # Data validation reports & audit logs
+│   ├── destination_galleries.json # Curated multi-image gallery catalog
 │   └── roamio.db                  # Canonical SQLite database
 ├── src/
-│   ├── config.py                  # Global paths, weights, and constants
+│   ├── config.py                  # Global configuration, weights, and constants
 │   ├── data/
 │   │   ├── models.py              # Pydantic schemas (Destination, UserPreferences)
-│   │   ├── normalizer.py          # Temporal, budget, and string sanitizers
-│   │   ├── entity_resolution.py   # Multi-source deduplication & canonical IDs
-│   │   ├── validator.py           # Data validation schema checks
+│   │   ├── normalizer.py          # Temporal, budget, and text sanitizers
+│   │   ├── entity_resolution.py   # Deduplication & canonical entity resolution
+│   │   ├── validator.py           # Pydantic schema validation checks
 │   │   ├── ingestion.py           # Multi-source dataset ingestion
-│   │   ├── pipeline.py            # Reproducible data & model build pipeline
-│   │   └── images/                # Automated landscape imagery acquisition
-│   │       ├── curated.py         # Curated high-res photo registry with attribution
-│   │       └── pipeline.py        # CLI module for Unsplash/Pexels + fallback caching
+│   │   ├── pipeline.py            # Reproducible data and embedding pipeline
+│   │   └── images/                # Landscape photo registries and caching
 │   ├── retrieval/
 │   │   ├── base.py                # Abstract retriever interface
-│   │   ├── tfidf.py               # TF-IDF lexical baseline retriever
+│   │   ├── tfidf.py               # Lexical TF-IDF retriever
 │   │   ├── dense.py               # FastEmbed dense semantic search
-│   │   └── two_stage.py           # Candidate filtering + dual retrieval
+│   │   └── two_stage.py           # Two-stage candidate filtering
 │   ├── ranking/
 │   │   ├── scorer.py              # Multi-feature hybrid ranking engine
 │   │   ├── diversity.py           # Maximal Marginal Relevance (MMR)
 │   │   ├── explain.py             # Feature attribution explainability engine
-│   │   └── engine.py              # Master Recommendation API service
+│   │   └── engine.py              # Master recommendation API service
 │   ├── chat/
-│   │   ├── client.py              # LLM provider abstraction (Gemini + Offline fallback)
-│   │   └── session.py             # Multi-turn state, refinement, and comparisons
+│   │   ├── client.py              # LLM client (Gemini with offline fallback)
+│   │   └── session.py             # Multi-turn conversation state manager
 │   └── evaluation/
 │       ├── metrics.py             # Precision@K, Recall@K, NDCG@K, MRR, ILD
 │       ├── benchmark.py           # Curated travel persona query suite
 │       └── runner.py              # Automated ablation runner
-├── notebooks/                     # 5 in-depth walkthrough experiment notebooks
-├── tests/                         # Full Pytest test suite (100% pass rate)
-├── app.py                         # Modernized Streamlit Web Application
-├── Dockerfile                     # Multi-stage production container
-├── docker-compose.yml             # Local Docker Compose setup
-├── requirements.txt               # Pinned production dependencies
-└── .github/workflows/ci.yml       # Automated GitHub Actions CI workflow
+├── notebooks/                     # Exploratory analysis and benchmark notebooks
+├── tests/                         # Comprehensive Pytest test suite (36 tests)
+├── app.py                         # Streamlit web application
+├── Dockerfile                     # Container definition
+├── docker-compose.yml             # Docker Compose orchestration
+├── requirements.txt               # Pinned Python dependencies
+└── .github/workflows/ci.yml       # GitHub Actions CI workflow
 ```
 
 ---
 
-## 🚀 Installation & Quickstart
+## Installation & Quickstart
 
-### 1. Clone & Set Up Virtual Environment
+### 1. Clone the Repository
 ```bash
 git clone https://github.com/mohikarathi/Roamio.git
 cd Roamio
+```
 
+### 2. Set Up Virtual Environment & Dependencies
+```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. Run Data Pipeline & Precompute Embeddings
+### 3. Build the Database & Precompute Embeddings
 ```bash
 python -m src.data.pipeline
 ```
-*(Runs ingestion, entity resolution, validation, SQLite population, and precomputes embeddings in ~20 seconds).*
+This populates the SQLite database, validates destination schemas, and precomputes the TF-IDF matrix and dense embedding vectors.
 
-### 3. Fetch Landscape Photography (100% Catalog Coverage)
-```bash
-python -m src.data.images.pipeline --missing-only
-```
-*(Acquires high-resolution landscape travel photography with photographer attribution for all 232 destinations via Unsplash/Pexels or the curated verified registry).*
-
-### 4. Launch the Streamlit App
+### 4. Launch the Streamlit Application
 ```bash
 streamlit run app.py
 ```
 Open [http://localhost:8501](http://localhost:8501) in your browser.
 
-### 4. Optional: Enable Google Gemini API
-To use Gemini for natural language response formatting, set your API key:
+### 5. Optional: Configure Gemini API Key
+To enable Gemini for natural language response formatting, set your environment variable:
 ```bash
 export GEMINI_API_KEY="your-gemini-api-key"
 ```
-*Note: If no API key is provided, Roamio automatically runs using its high-speed offline rule-based parser with zero setup.*
+If no key is provided, Roamio runs automatically using its built-in rule-based conversational parser.
 
 ---
 
-## 🐳 Docker Deployment
+## Docker Deployment
 
-Roamio includes a production-ready `Dockerfile` and `docker-compose.yml`:
+Build and run Roamio using Docker Compose:
 
 ```bash
-# Build and start container
 docker-compose up --build -d
-
-# View logs
-docker-compose logs -f
-
-# Access application at http://localhost:8501
 ```
+
+View application logs:
+```bash
+docker-compose logs -f
+```
+Access the application at [http://localhost:8501](http://localhost:8501).
 
 ---
 
-## 🧪 Running Automated Tests
+## Automated Tests
 
-Run the comprehensive pytest suite:
+Run the complete automated test suite:
 ```bash
 PYTHONPATH=. pytest tests/ -v
 ```
 
-Run the live ablation benchmark:
+Run the benchmark evaluation runner:
 ```bash
 PYTHONPATH=. python -m src.evaluation.runner
 ```
 
 ---
 
-## 🎓 The ML Engineering Story
+## Design Decisions
 
-### Why TF-IDF?
-TF-IDF acts as our deterministic lexical baseline. For specific proper nouns and exact activity queries (e.g. *"scuba diving in Great Barrier Reef"*), lexical matching is precise, fast ($1.07\text{ ms}$), and computationally lightweight.
-
-### Why Dense Sentence Embeddings?
-Lexical matching fails when users express subjective desires (*"peaceful mountain getaway"*). Sentence transformers map queries and destination descriptions into a continuous vector space where semantically synonymous phrases cluster closely together, doubling retrieval NDCG.
-
-### Why Precompute Embeddings?
-Destination descriptions are static or slowly changing, whereas user queries arrive dynamically in real time. Precomputing and normalizing destination embeddings once at build time allows query inference to run via a fast vector dot product in $< 5\text{ ms}$, eliminating redundant inference costs.
-
-### Why Hybrid Multi-Criteria Ranking?
-Semantic similarity alone cannot verify whether a hotel fits a user's wallet or whether visiting in December will coincide with monsoon season. The hybrid scoring engine combines semantic match with financial decay curves and seasonal alignment.
-
-### Why Not Let the LLM Recommend Directly?
-Allowing an LLM to generate recommendations independently introduces severe hallucination risks: invented prices, non-existent destinations, and non-deterministic rankings. Roamio uses the LLM strictly as an **interface**: extracting structured user intent and communicating deterministic recommendation facts.
+- **Why Dual Retrieval?** Lexical TF-IDF search handles exact landmark names and specific activities, while dense sentence embeddings capture broad experiential concepts (*"serene retreat"* matching *"peaceful temple"*). Combining both ensures high recall across query styles.
+- **Why Precomputed Embeddings?** Destination descriptions are precomputed and normalized once at build time. User query vectors are projected in real time and evaluated via dot products in under 5 ms, keeping latency low.
+- **Why Multi-Feature Hybrid Scoring?** Recommending travel destinations requires balancing subjective interest with real-world constraints like budget, travel dates, and safety. A hybrid scorer guarantees practical feasibility.
+- **Why Separate the LLM from Ranking?** Allowing language models to generate recommendations directly often leads to hallucinated prices, invalid locations, and ungrounded suggestions. In Roamio, the recommendation engine handles candidate scoring, while the LLM acts purely as a conversational interface.
 
 ---
 
-## 📄 License
-This project is open-source under the [MIT License](LICENSE).
+## License
+This project is open-source and available under the [MIT License](LICENSE).
