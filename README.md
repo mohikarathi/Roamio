@@ -16,7 +16,7 @@
 - [Data Retrieval & Candidate Generation](#data-retrieval--candidate-generation)
 - [Hybrid Recommendation Engine](#hybrid-recommendation-engine)
 - [Conversational Concierge](#conversational-concierge)
-- [Destination Catalog & Data Pipeline](#destination-catalog--data-pipeline)
+- [Data Sources & Destination Catalog](#data-sources--destination-catalog)
 - [Evaluation & Benchmark Results](#evaluation--benchmark-results)
 - [Project Structure](#project-structure)
 - [Installation & Quickstart](#installation--quickstart)
@@ -188,13 +188,27 @@ The conversational interface acts as an intelligent layer above the recommendati
 
 ---
 
-## Destination Catalog & Data Pipeline
+## Data Sources & Destination Catalog
 
-Roamio includes a structured destination catalog stored in SQLite (`data/roamio.db`) with full provenance metadata:
+Roamio combines structured travel data, open geographical databases, climatological records, and open-license photography into a unified, canonical SQLite database (`data/roamio.db`).
 
-- **250+ Curated Destinations**: Spanning 41 countries across Asia, Europe, the Americas, Africa, and Oceania.
-- **Rich Metadata Fields**: Each destination includes canonical coordinates, climate and seasonality, estimated daily costs in INR, local currency, primary and secondary categories, narrative overviews, top activities, famous local foods, and safety tiers.
-- **Automated Data Pipeline**: A reproducible pipeline (`python -m src.data.pipeline`) handles data normalization, entity resolution, schema validation via Pydantic, SQLite population, and embedding precomputation.
+### Where the Data Comes From
+
+| Data Source | Type & Coverage | Information Provided | Usage & License |
+| :--- | :--- | :--- | :--- |
+| **Curated Travel Inventory** | 250+ global destinations across 41 countries | Destination names, regions, primary categories, approximate tourist volumes, and comprehensive descriptions | Open travel datasets |
+| **Wikidata & Wikipedia** | Structured knowledge graph (Wikidata QIDs) | UNESCO World Heritage designations, cultural significance, historical landmarks, signature local foods, and top activities | Creative Commons CC0 / CC BY-SA |
+| **GeoNames & OpenStreetMap** | Spatial coordinates and administrative hierarchy | Canonical latitude, longitude, continent mappings, country codes, and regional administrative boundaries | CC BY 4.0 / ODbL |
+| **Open-Meteo & Climate Data** | Climatological temperature and precipitation records | Monthly weather patterns mapped to optimal and peak visiting seasons (best travel months) | Open Access |
+| **Wikimedia Commons** | Open media repository | High-resolution landscape photography of cultural landmarks, architectural sites, and natural wonders with photographer attributions | Creative Commons / Public Domain |
+| **Unsplash** | Editorial travel photography | Curated landscape photography covering beaches, mountain ranges, cities, and heritage sites | Unsplash License (free commercial & non-commercial use) |
+
+### Data Pipeline & Normalization
+A reproducible data pipeline (`python -m src.data.pipeline`) ingests and unifies these diverse data sources:
+1. **Sanitization & Normalization**: Standardizes country and continent names, normalizes descriptions, and parses tourist volume metrics.
+2. **Entity Resolution**: Reconciles spelling variations across sources (e.g. matching Wikidata QIDs, or comparing geographic coordinates and token similarity) to prevent duplicate entries.
+3. **Financial Estimation**: Estimates standardized daily travel costs per person in INR based on destination budget tier and local purchasing indices.
+4. **Validation**: Enforces strict schema integrity via Pydantic (`Destination` model) before populating the database and precomputing search indices.
 
 ---
 
