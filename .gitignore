@@ -8,6 +8,7 @@ env/
 venv/
 .venv/
 ENV/
+uv.lock
 
 # Temporary image cache (duplicate of static/images)
 data/images_cache/
