@@ -512,7 +512,7 @@ st.markdown("""
             </svg>
         </div>
         <div class="brand-logo">Roamio<span style="color:#C96F4A;">.</span></div>
-        <span class="brand-edition-chip">Curated World Guide</span>
+        <span class="brand-edition-chip">Curated Travel Guide</span>
     </div>
     <div class="nav-pills-wrap">
         <div class="nav-pill nav-pill-accent">
