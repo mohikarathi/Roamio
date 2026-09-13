@@ -1,10 +1,11 @@
 # Roamio — Curated Travel Guide and Recommendation System
 
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://roamiotravelrecommendation.streamlit.app/)
 [![Roamio CI](https://github.com/mohikarathi/Roamio/actions/workflows/ci.yml/badge.svg)](https://github.com/mohikarathi/Roamio/actions/workflows/ci.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Streamlit](https://img.shields.io/badge/Streamlit-1.40%2B-FF4B4B.svg)](https://streamlit.io/)
-[![FastEmbed](https://img.shields.io/badge/FastEmbed-ONNX-orange.svg)](https://github.com/qdrant/fastembed)
+
+> **Live Application**: Try Roamio live on Streamlit Cloud at **[roamiotravelrecommendation.streamlit.app](https://roamiotravelrecommendation.streamlit.app/)**.
 
 > **Roamio** is a curated travel guide and intelligent recommendation platform that combines conversational AI planning with multi-signal data retrieval and ranking algorithms. Roamio helps travelers discover destinations through natural language conversation, dynamic preference filtering, interactive maps, and transparent match explanations.
 
@@ -20,7 +21,7 @@
 - [Evaluation & Benchmark Results](#evaluation--benchmark-results)
 - [Project Structure](#project-structure)
 - [Installation & Quickstart](#installation--quickstart)
-- [Docker Deployment](#docker-deployment)
+- [Live Deployment](#live-deployment)
 - [Automated Tests](#automated-tests)
 - [Design Decisions](#design-decisions)
 - [License](#license)
@@ -315,19 +316,15 @@ If no key is provided, Roamio runs automatically using its built-in rule-based c
 
 ---
 
-## Docker Deployment
+## Live Deployment
 
-Build and run Roamio using Docker Compose:
+Roamio is hosted and continuously deployed on **Streamlit Community Cloud**:
 
-```bash
-docker-compose up --build -d
-```
+- **Live URL**: [roamiotravelrecommendation.streamlit.app](https://roamiotravelrecommendation.streamlit.app/)
+- **Repository Source**: Directly connected to the `main` branch of this GitHub repository with automated redeployment on push.
+- **Continuous Integration**: GitHub Actions CI workflow runs automated tests and validation across pull requests.
 
-View application logs:
-```bash
-docker-compose logs -f
-```
-Access the application at [http://localhost:8501](http://localhost:8501).
+*(Optional)* A `Dockerfile` and `docker-compose.yml` are also provided in the repository for developers who wish to containerize and run the application locally or self-host on custom cloud infrastructure.
 
 ---
 
